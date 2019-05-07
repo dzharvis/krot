@@ -54,6 +54,7 @@ data class Request(val message: RawMessage) : Message() {
 data class Piece(val message: RawMessage) : Message() {
     val id: Int = 7
 }
+
 class PeerConnection(
     val addr: InetSocketAddress,
     val output: Channel<PeerMsg>,
@@ -89,19 +90,19 @@ class PeerConnection(
                 val bb = ByteBuffer.allocate(32384)
                 val peerMessages = produce(capacity = 100) {
                     while (isActive) {
-                        log("Read started")
+//                        log("Read started")
                         val element = readInputMessage(bb, channel)
-                        log("Recevied: $element.")
+//                        log("Recevied: $element.")
                         when (element) {
                             is KeepAlive,
                             is Have,
                             is Bitfield -> {
-                                log("-Processing started: $element")
+//                                log("-Processing started: $element")
                                 processPayload(element)
-                                log("-Processing ended: $element")
+//                                log("-Processing ended: $element")
                             }
                             else -> {
-                                log("sending: $element")
+//                                log("sending: $element")
                                 send(element)
                             }
                         }
@@ -133,8 +134,17 @@ class PeerConnection(
                 else -> throw ex
             }
         } finally {
-            output.send(Closed(this))
-            input.close()
+            val peer = this
+            withContext(NonCancellable) {
+                for (message in input) {
+                    when (message) {
+                        is DownloadRequest -> {
+                            output.send(DownloadCanceledRequest(message.id))
+                        }
+                    }
+                }
+                output.send(Closed(peer))
+            }
             channel.close()
         }
     }
@@ -168,7 +178,7 @@ class PeerConnection(
         log(String(b, Charset.forName("Windows-1251")))
     }
 
-    suspend private fun downloadPiece(
+    private suspend fun downloadPiece(
         id: Int,
         peerMessages: ReceiveChannel<Message>,
         bb: ByteBuffer,
@@ -176,26 +186,30 @@ class PeerConnection(
     ): DataPiece {
         piecesInProgress.add(id)
         try {
-            // interested byte
-            bb.clear()
-            bb.putInt(1)
-            bb.put(2)
-            bb.flip()
-            tcpClient.write(channel, bb)
-            log("Interested byte sent")
+            if (choked) {
+                // interested byte
+                bb.clear()
+                bb.putInt(1)
+                bb.put(2)
+                bb.flip()
+                tcpClient.write(channel, bb)
+                log("Interested byte sent")
 
-            // wait unchoke
-            val response = peerMessages.receive()
-            log("resonse received $response")
-            when (response) {
-                is Unchoke -> choked = false
-                else -> throw InvalidObjectException("Unchoke expected, $response received")
+                // wait unchoke
+                val response = peerMessages.receive()
+                log("resonse received $response")
+                when (response) {
+                    is Unchoke -> choked = false
+                    else -> throw InvalidObjectException("Unchoke expected, $response received")
+                }
             }
+
             // loop request for pieces
 
             val defaultChunkSize = 16384
             var numChunks = pieceLength / defaultChunkSize // 16KB
             log("Num chunks selected: $numChunks")
+            val pieceBytes = ByteBuffer.allocate(pieceLength + defaultChunkSize)
             if (pieceLength % defaultChunkSize != 0) numChunks++
             for (i in 0 until pieceLength step defaultChunkSize) {
                 bb.clear()
@@ -208,19 +222,25 @@ class PeerConnection(
                 bb.putInt(chunkSize)
                 bb.flip()
                 // wait piece
-                log("requesting piece")
+                log("requesting piece [$pieceLength, $id] $i, $chunkSize")
                 tcpClient.write(channel, bb)
                 val response = peerMessages.receive()
-                log("received piece !")
                 when (response) {
-                    is Piece -> log("Piece received!")
+                    is Piece -> {
+                        log("Piece received! ${response.message.body.size}")
+                        pieceBytes.put(response.message.body)
+                    }
                     else -> throw InvalidObjectException("Piece expected, $response received")
                 }
             }
+            pieceBytes.flip()
+            val data = ByteArray(pieceBytes.limit())
+            log("${data.size} - bytes downloaded")
+            pieceBytes.get(data)
+            return DataPiece(id, data)
         } finally {
             piecesInProgress.remove(id)
         }
-        TODO()
     }
 
     private suspend fun readInputMessage(bb: ByteBuffer, channel: AsynchronousSocketChannel): Message {
@@ -234,7 +254,7 @@ class PeerConnection(
             return KeepAlive
         }
 
-        log("not keep-alive read started")
+//        log("not keep-alive read started")
 
         bb.clear()
         tcpClient.read(channel, bb, 1)
@@ -285,6 +305,8 @@ class PeerConnection(
             is Unchoke -> choked = false
             is Piece -> { // piece
 
+            }
+            is KeepAlive -> {
             }
             else -> log("Unknown message $payload")
         }

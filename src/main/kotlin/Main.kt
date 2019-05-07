@@ -4,8 +4,6 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.ticker
 import kotlinx.coroutines.selects.select
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import protocol.PeerConnection
 import tracker.processFile
 import java.net.*
@@ -18,12 +16,15 @@ data class Closed(val peer: PeerConnection) : PeerMsg()
 object Ticker : PeerMsg()
 data class DataPiece(val id: Int, val bytes: ByteArray) : PeerMsg()
 data class DownloadRequest(val id: Int) : PeerMsg()
+data class DownloadCanceledRequest(val id: Int) : PeerMsg()
 
 data class Piece(val id: Int, var downloaded: Boolean = false, val peers: MutableSet<PeerConnection> = mutableSetOf())
 
 
 fun main() {
     val (torrent, peers, sha1, peerId, numPieces, pieceLength) = processFile("/Users/dzharvis/Downloads/file.torrent")
+
+    println("$numPieces, $pieceLength")
 
     val input = Channel<PeerMsg>(1000) // small buffer just in case
 
@@ -39,7 +40,7 @@ fun main() {
     // supervisor - communicates with peers, download data, etc.
     val app = GlobalScope.launch {
         //TODO use bandwidth check. Slow download speed = increase simultaneous downloads
-        val maxSimultaneousDownloads = 10
+        val maxSimultaneousDownloads = 20
         var downloadsInProgess = 0
         // init all pieces
         var piecesToPeers = mutableMapOf<Int, Piece>()
@@ -55,9 +56,9 @@ fun main() {
         // also i don't want an actual actor with a state
         val ticker = ticker(delayMillis = 1000, initialDelayMillis = 0)
         while (true) {
-            when (val message = select<PeerMsg>{
-                ticker.onReceive {Ticker}
-                input.onReceive{it}
+            when (val message = select<PeerMsg> {
+                ticker.onReceive { Ticker }
+                input.onReceive { it }
             }) {
                 is HasPiece -> {
                     val (id, has, peer) = message
@@ -73,21 +74,27 @@ fun main() {
                     downloadsInProgess += downloadsStarted
                 }
                 is Ticker -> {
+                    println("Ticker! 1[$downloadsInProgess]")
                     val downloadsStarted = initiateDownloadIfNecessary(
                         piecesToPeers,
                         Math.max(0, maxSimultaneousDownloads - downloadsInProgess)
                     )
                     downloadsInProgess += downloadsStarted
+                    println("Ticker! 2[$downloadsInProgess]")
                 }
                 is Closed -> {
                     for ((_, v) in piecesToPeers) {
                         v.peers.remove(message.peer)
+                        downloadsInProgess -= message.peer.piecesInProgress.size
 
                     }
                 }
+                is DownloadCanceledRequest -> {
+                    downloadsInProgess--
+                }
                 is DataPiece -> {
                     downloadsInProgess--
-                    println("Piece received! Yay!")
+                    println("------ !!! Piece received! Yay!")
                 }
                 else -> println(message)
             }
@@ -97,22 +104,22 @@ fun main() {
     runBlocking { app.join() }
 }
 
-suspend fun initiateDownloadIfNecessary(piecesToPeers: Map<Int, Piece>, amount: Int):Int {
-    return piecesToPeers
-        .map { (_, piece) -> piece }
-        .filter { piece ->
-            !piece.downloaded && piece.peers.filter { peer -> !peer.piecesInProgress.contains(piece.id) }.isNotEmpty()
-        }
-        .shuffled()
-        .take(amount)
-        .map { piece ->
-            val filter = piece.peers.filter { !it.piecesInProgress.contains(piece.id) }
-            if (filter.isNotEmpty()){
-                val peer = filter.random()
-                peer.input.send(DownloadRequest(piece.id))
-                1
-            } else {
-                0
+// returns amount of downloads initiated
+suspend fun initiateDownloadIfNecessary(piecesToPeers: Map<Int, Piece>, amount: Int): Int {
+    return if (amount == 0) 0
+    else
+        piecesToPeers
+            .map { (_, piece) -> Pair(piece, piece.peers.filter { peer -> !peer.piecesInProgress.contains(piece.id) }) }
+            .filter { (piece, peers) ->
+                !piece.downloaded && peers.isNotEmpty()
             }
-        }.fold(0, {acc, i -> acc + i})
+            .shuffled()
+            .take(amount)
+            .map { (piece, peers) ->
+                val peer = peers.random()
+                if (peer.input.offer(DownloadRequest(piece.id)))
+                    1
+                else
+                    0
+            }.fold(0, { acc, i -> acc + i })
 }
