@@ -96,6 +96,7 @@ fun main() {
                 }
                 is DownloadCanceledRequest -> {
                     downloadsInProgess--
+                    piecesToPeers[message.id]?.inProgress = false
                 }
                 is Piece -> {
                     downloadsInProgess--
