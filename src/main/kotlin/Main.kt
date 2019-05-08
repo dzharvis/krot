@@ -32,7 +32,7 @@ data class PieceInfo(
 fun main() {
 
     val torrentData = processFile("/Users/dzharvis/Downloads/winrar.torrent")
-    val (torrent, peers, sha1, peerId, numPieces, pieceLength, lastPieceLength) = torrentData
+    val (_, peers, sha1, peerId, numPieces, pieceLength, lastPieceLength) = torrentData
 
     val input = Channel<SupervisorMsg>(100) // small buffer just in case
 
@@ -52,7 +52,7 @@ fun main() {
     // supervisor - communicates with peers, download data, etc.
     val app = GlobalScope.launch {
         //TODO use bandwidth check. Slow download speed = increase simultaneous downloads
-        val maxSimultaneousDownloads = 20
+        val maxSimultaneousDownloads = 40
         var downloadsInProgess = 0
         // init all pieces
         var piecesToPeers = mutableMapOf<Int, PieceInfo>()
@@ -125,6 +125,7 @@ fun main() {
     runBlocking {
         diskJob.join()
         app.join()
+        Disk.close()
     }
 }
 
@@ -144,7 +145,7 @@ fun initiateDownloadIfNecessary(
     return if (amount == 0) emptyList()
     else
         piecesToPeers
-            .map { (id, piece) -> piece }
+            .map { (_, piece) -> piece }
             .filter { piece ->
                 !piece.inProgress && piece.peers.isNotEmpty()
             }
