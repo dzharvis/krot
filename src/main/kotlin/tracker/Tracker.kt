@@ -71,7 +71,8 @@ data class TorrentData(
     val sha1: ByteArray,
     val peerId: ByteArray,
     val numPieces: Int,
-    val pieceLength: Int
+    val pieceLength: Int,
+    val lastPieceLength: Int
 )
 
 fun processFile(file: String): TorrentData {
@@ -82,5 +83,7 @@ fun processFile(file: String): TorrentData {
     val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
     val pieceLength = torrent["info"]!!.map["piece length"]!!.int
     val peers = getPeers(String(sha1, charset), String(peerId, charset), torrent["announce"]!!.string)
-    return TorrentData(torrent, peers, sha1, peerId, numPieces, pieceLength)
+    val numBytes = torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.int }.fold(0, {acc, i -> acc + i})
+    val diff = numPieces * pieceLength - numBytes
+    return TorrentData(torrent, peers, sha1, peerId, numPieces, pieceLength, pieceLength - diff)
 }

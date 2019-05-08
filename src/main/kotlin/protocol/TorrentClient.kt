@@ -2,24 +2,29 @@ package protocol
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
-import main.*
+import kotlinx.coroutines.selects.select
+import main.Closed
+import main.DownloadRequest
+import main.SupervisorMsg
+import main.Ticker
+import main.HasPiece
+import main.Piece
+import main.DownloadCanceledRequest
+import java.io.IOException
 import java.io.InvalidObjectException
 import java.lang.Exception
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.AsynchronousSocketChannel
-import java.util.concurrent.ConcurrentSkipListSet
 
 class PeerConnection(
     val addr: InetSocketAddress,
-    val output: Channel<PeerMsg>,
-    val pieceLength: Int
+    val output: Channel<SupervisorMsg>
 ) {
 
     @Volatile
     var choked = true
-    val piecesInProgress = ConcurrentSkipListSet<Int>()
-    val input = Channel<PeerMsg>() // for external events. Should be called only with offer
+    val input = Channel<SupervisorMsg>() // for external events. Should be called only with offer
 
     private fun log(msg: String) {
         println("[$addr] $msg")
@@ -49,18 +54,24 @@ class PeerConnection(
 
                 // read supervisor messages and write requests to to peer
                 launch {
+                    // 1.5 send keepalive
+                    val ticker = ticker(delayMillis = 1000 * 90, initialDelayMillis = 1000 * 60, mode = TickerMode.FIXED_DELAY)
+                    val protocol = Protocol(addr, 8192, channel)
                     while (isActive) {
-                        val message = input.receive()
-                        when (message) {
+                        when (val message = select<SupervisorMsg> {
+                            input.onReceive { it }
+                            ticker.onReceive { Ticker }
+                        }) {
                             is DownloadRequest -> {
-                                piecesInProgress.add(message.id)
                                 val piece = try {
-                                    downloadPiece(message.id, peerMessages, Protocol(addr, 8192, channel))
-                                } finally {
-                                    piecesInProgress.remove(message.id)
+                                    downloadPiece(message.id, message.pieceLength, peerMessages, protocol)
+                                } catch (ex: Exception) {
+                                    output.send(DownloadCanceledRequest(message.id))
+                                    throw ex
                                 }
                                 output.send(piece)
                             }
+                            is Ticker -> protocol.writeMessage(KeepAlive)
                         }
                     }
                 }
@@ -68,7 +79,10 @@ class PeerConnection(
         } catch (ex: Exception) {
             log("Disconnected from: $addr, reason: $ex")
             // TODO("Implement retries and reconnects")
-            throw ex
+            when (ex) {
+                is IOException -> {}
+                else -> throw ex
+            }
         } finally {
             val peer = this
             channel.close()
@@ -80,8 +94,7 @@ class PeerConnection(
     }
 
     private suspend fun waitUnchoke(peerMessages: ReceiveChannel<Message>) {
-        val response = peerMessages.receive()
-        when (response) {
+        when (val response = peerMessages.receive()) {
             is Unchoke -> choked = false
             else -> throw InvalidObjectException("Unchoke expected, $response received")
         }
@@ -89,6 +102,7 @@ class PeerConnection(
 
     private suspend fun downloadPiece(
         id: Int,
+        pieceLength: Int,
         peerMessages: ReceiveChannel<Message>,
         protocol: Protocol
     ): Piece {
@@ -96,22 +110,19 @@ class PeerConnection(
             // interested byte
             protocol.writeMessage(Interested) // i don't know if i should send interested again after choking
             log("Interested byte sent")
-
             // wait unchoke
             waitUnchoke(peerMessages)
+            log("unchoke here")
         }
 
         // loop request for chunks
-        val defaultChunkSize = 16384
-        var numChunks = pieceLength / defaultChunkSize // 16KB
-        log("Num chunks selected: $numChunks")
+        val defaultChunkSize = Math.min(pieceLength, 16384)
         val pieceBytes = ByteBuffer.allocate(pieceLength + defaultChunkSize)
-        if (pieceLength % defaultChunkSize != 0) numChunks++
         for (i in 0 until pieceLength step defaultChunkSize) {
             val chunkSize = if (i + defaultChunkSize > pieceLength) (pieceLength - i) else defaultChunkSize
             log("chunk size selected: $chunkSize")
             // wait piece
-            log("requesting piece [$pieceLength, $id] $i, $chunkSize")
+            log("requesting piece [$pieceLength, $id] $i, $defaultChunkSize")
             protocol.writeMessage(Request(id, i, chunkSize))
             when (val response = peerMessages.receive()) {
                 is Chunk -> {
@@ -120,7 +131,8 @@ class PeerConnection(
                 }
                 is Choke -> {
                     choked = true
-                    return downloadPiece(id, peerMessages, protocol) // retry
+                    // TODO limit number of retries
+                    return downloadPiece(id, pieceLength, peerMessages, protocol) // retry
                 }
                 else -> throw InvalidObjectException("Chunk expected, $response received")
             }
