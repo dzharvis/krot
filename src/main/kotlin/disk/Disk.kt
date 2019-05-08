@@ -10,20 +10,22 @@ import java.io.RandomAccessFile
 data class FileOperation(val file: List<String>, val offset: Long, val data: ByteArray)
 
 object Disk {
-    fun initWriter(input: Channel<Piece>, torrent: TorrentData) {
-        GlobalScope.launch {
+    fun initWriter(input: Channel<Piece>, torrent: TorrentData): Job {
+        return GlobalScope.launch {
             for (piece in input) {
-                val fileOperations = prepare(piece, torrent)
+                val fileOperations = prepare(piece, torrent).groupBy { it.file }
                 withContext(Dispatchers.IO) {
-                    for ((file, offset, data) in fileOperations) {
-                        // todo group by file
-                        val fileName = "/tmp/${file.joinToString("/")}"
+                    for ((path, fileOperations) in fileOperations) {
+                        val fileName = "/tmp/${path.joinToString("/")}"
                         val f = File(fileName)
                         f.parentFile.mkdirs()
-                        val raf = RandomAccessFile(f, "rw")
-                        raf.seek(offset)
-                        raf.write(data)
-                        raf.close()
+                        RandomAccessFile(f, "rw").use { raf ->
+                            for ((_, offset, data) in fileOperations) {
+                                raf.seek(offset)
+                                raf.write(data)
+                                raf.close()
+                            }
+                        }
                     }
                 }
             }

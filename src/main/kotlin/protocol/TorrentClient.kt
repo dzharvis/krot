@@ -27,7 +27,7 @@ class PeerConnection(
     val input = Channel<SupervisorMsg>() // for external events. Should be called only with offer
 
     private fun log(msg: String) {
-        println("[$addr] $msg")
+//        println("[$addr] $msg")
     }
 
     suspend fun start(sha1: ByteArray, peerId: ByteArray) {

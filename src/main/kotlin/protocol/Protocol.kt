@@ -30,7 +30,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
     val bb = ByteBuffer.allocate(bufferSize)
 
     fun log(msg: String) {
-        println("[$addr] $msg")
+//        println("[$addr] $msg")
     }
 
     // returns only after handshake success
