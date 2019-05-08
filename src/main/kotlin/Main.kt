@@ -14,19 +14,18 @@ sealed class PeerMsg
 data class HasPiece(val id: Int, val has: Boolean, val peer: PeerConnection) : PeerMsg()
 data class Closed(val peer: PeerConnection) : PeerMsg()
 object Ticker : PeerMsg()
-data class DataPiece(val id: Int, val bytes: ByteArray) : PeerMsg()
+data class Piece(val id: Int, val bytes: ByteArray) : PeerMsg()
 data class DownloadRequest(val id: Int) : PeerMsg()
 data class DownloadCanceledRequest(val id: Int) : PeerMsg()
 
-data class Piece(val id: Int, var downloaded: Boolean = false, val peers: MutableSet<PeerConnection> = mutableSetOf())
-
+data class PieceInfo(val id: Int, var downloaded: Boolean = false, val peers: MutableSet<PeerConnection> = mutableSetOf())
 
 fun main() {
     val (torrent, peers, sha1, peerId, numPieces, pieceLength) = processFile("/Users/dzharvis/Downloads/file.torrent")
 
     println("$numPieces, $pieceLength")
 
-    val input = Channel<PeerMsg>(1000) // small buffer just in case
+    val input = Channel<PeerMsg>(100) // small buffer just in case
 
     // start all peers bg process'
     val peerJobs = peers.also { println("Found ${it.size} peers") }.map { (ip, port) ->
@@ -43,11 +42,9 @@ fun main() {
         val maxSimultaneousDownloads = 20
         var downloadsInProgess = 0
         // init all pieces
-        var piecesToPeers = mutableMapOf<Int, Piece>()
-//        val piecesToDownload = mutableSetOf<Piece>()
+        var piecesToPeers = mutableMapOf<Int, PieceInfo>()
         for (i in 0 until numPieces) {
-            val piece = Piece(i)
-//            piecesToDownload.add(piece)
+            val piece = PieceInfo(i)
             piecesToPeers[i] = piece
         }
 
@@ -92,9 +89,9 @@ fun main() {
                 is DownloadCanceledRequest -> {
                     downloadsInProgess--
                 }
-                is DataPiece -> {
+                is Piece -> {
                     downloadsInProgess--
-                    println("------ !!! Piece received! Yay!")
+                    println("------ !!! Chunk received! Yay!")
                 }
                 else -> println(message)
             }
@@ -105,7 +102,7 @@ fun main() {
 }
 
 // returns amount of downloads initiated
-suspend fun initiateDownloadIfNecessary(piecesToPeers: Map<Int, Piece>, amount: Int): Int {
+fun initiateDownloadIfNecessary(piecesToPeers: Map<Int, PieceInfo>, amount: Int): Int {
     return if (amount == 0) 0
     else
         piecesToPeers

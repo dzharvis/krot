@@ -11,6 +11,8 @@ import kotlin.coroutines.Continuation
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
+// Not thread safe
+// Use as thread/coroutine local instance
 class AsyncTcpClient {
 
     @Volatile

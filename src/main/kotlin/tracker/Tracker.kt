@@ -45,6 +45,7 @@ private fun getPeers(infoHash: String, peerIdHash: String, url: String): List<Pe
         "downloaded" to "0",
         "port" to "10000",
         "compact" to "1",
+        "numwant" to "100",
         "peer_id" to peerIdHash,
         "left" to "10001"
     )
