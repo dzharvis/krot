@@ -3,14 +3,91 @@ package disk
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import main.Piece
+import main.SHA1
+import main.progress.Progress
 import tracker.TorrentData
 import java.io.File
 import java.io.RandomAccessFile
+import java.util.*
+import kotlin.collections.ArrayList
 
 data class FileOperation(val file: List<String>, val offset: Long, val data: ByteArray)
 
 object Disk {
     private val filesCache = mutableMapOf<String, RandomAccessFile>()
+
+    fun checkDownloadedPieces(torrentData: TorrentData, folder: String, progress: Progress): List<Int> {
+        val presentPieces = List(torrentData.numPieces) { i ->
+            val byteOffset = i * torrentData.pieceLength
+            val byteLength =
+                if (i == torrentData.numPieces - 1) torrentData.lastPieceLength else torrentData.pieceLength
+            val expectedSha1 = torrentData.torrent["info"]!!.map["pieces"]!!.bytes.copyOfRange(i * 20, i * 20 + 20)
+            val filePieceSha1 = getFilePieceSha1(i, torrentData, byteOffset, byteLength, folder)
+
+            if (Arrays.equals(expectedSha1, filePieceSha1)) {
+                progress.setDone(i)
+                progress.printProgress()
+                i
+            } else {
+                null
+            }
+        }.filterNotNull()
+
+        close()
+        filesCache.clear()
+
+        return presentPieces
+    }
+
+    private fun getFilePieceSha1(
+        pieceId: Int,
+        torrentData: TorrentData,
+        byteOffset: Long,
+        byteLength: Long,
+        folder: String
+    ): ByteArray {
+        val files = torrentData.torrent["info"]!!.map["files"]!!.list
+        var fileOffset = 0L
+        var pieceBytes = ByteArray(0)
+        for (f in files) {
+            // TODO Use proper file path construction to be windows friendly
+            val filePath = f.map["path"]!!.list.map { it.string }.joinToString("/")
+            val fileLength = f.map["length"]!!.long
+            val file = File(File(folder), filePath)
+            if (!file.exists()) {
+                fileOffset += fileLength
+                continue
+            }
+
+            val intersection = intersection(
+                fileOffset,
+                fileOffset + fileLength,
+                byteOffset,
+                byteOffset + byteLength
+            )
+
+            if (!intersection.intersects) {
+                fileOffset += fileLength
+                continue
+            }
+
+//            println("intersection found $pieceId ${intersection.x} ${intersection.y} ${file.absolutePath}")
+
+            val raf = openRandomAccessFile(file)
+            val fileBytes = ByteArray((intersection.y - intersection.x).toInt())
+            raf.seek(intersection.x - fileOffset)
+            val bytesRead = raf.read(fileBytes)
+            if(bytesRead != fileBytes.size) return pieceBytes
+
+            pieceBytes += fileBytes
+            fileOffset += fileLength
+
+            if (pieceBytes.size == byteLength.toInt()) {
+                break
+            }
+        }
+        return SHA1.calculate(pieceBytes)
+    }
 
     fun initWriter(input: Channel<Piece>, torrent: TorrentData, folder: String): Job {
         val pieceLength = torrent.pieceLength
@@ -40,20 +117,24 @@ object Disk {
                 for ((path, fileOperations) in fileOperations) {
                     val parent = File(folder)
                     val f = File(parent, path.joinToString("/"))
-                    val raf = if (!filesCache.contains(f.absolutePath)) {
-                        f.parentFile.mkdirs()
-                        val file = RandomAccessFile(f, "rw")
-                        filesCache[f.absolutePath] = file
-                        file
-                    } else {
-                        filesCache[f.absolutePath]!!
-                    }
+                    val raf = openRandomAccessFile(f)
                     for ((_, offset, data) in fileOperations) {
                         raf.seek(offset)
                         raf.write(data)
                     }
                 }
             }
+        }
+    }
+
+    private fun openRandomAccessFile(f: File): RandomAccessFile {
+        return if (!filesCache.contains(f.absolutePath)) {
+            f.parentFile.mkdirs()
+            val file = RandomAccessFile(f, "rw")
+            filesCache[f.absolutePath] = file
+            file
+        } else {
+            filesCache[f.absolutePath]!!
         }
     }
 

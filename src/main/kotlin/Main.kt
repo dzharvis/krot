@@ -9,8 +9,13 @@ import kotlinx.coroutines.channels.ticker
 import kotlinx.coroutines.selects.select
 import main.progress.Progress
 import protocol.PeerConnection
+import tracker.TorrentData
 import tracker.processFile
 import java.net.*
+import java.security.MessageDigest
+import java.util.*
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ConcurrentSkipListSet
 
 // messages for communication with peers
 sealed class SupervisorMsg
@@ -29,6 +34,14 @@ data class PieceInfo(
     val peers: MutableSet<PeerConnection> = mutableSetOf()
 )
 
+object SHA1 {
+    fun calculate(bytes: ByteArray): ByteArray {
+        val md = MessageDigest.getInstance("SHA-1")
+        md.update(bytes, 0, bytes.size)
+        return md.digest()!!
+    }
+}
+
 fun main(args: Array<String>) {
 
     if (args.size < 2) {
@@ -39,17 +52,61 @@ fun main(args: Array<String>) {
 
     val torrentData = processFile(file)
     val (_, peers, sha1, peerId, numPieces, pieceLength, lastPieceLength) = torrentData
-
+    val progress = Progress(numPieces, pieceLength)
+    progress.printProgress()
     val input = Channel<SupervisorMsg>(100) // small buffer just in case
     val diskChannel = Channel<Piece>(50)
+
+    progress.state = "Hash check"
+    progress.printProgress()
+
+    val presentPieces = Disk.checkDownloadedPieces(torrentData, dstFolder, progress).toSet()
     val diskJob = Disk.initWriter(diskChannel, torrentData, dstFolder)
 
-    println("Found ${peers.size} peers")
+    if (presentPieces.size == numPieces) {
+        progress.state = "Done"
+        progress.printProgress()
+        return
+    }
+
+    Runtime.getRuntime().addShutdownHook(Thread() {
+        println("\nShutting down...")
+        try {
+            diskChannel.close()
+            runBlocking { diskJob.join() }
+            Disk.close()
+        } catch (ex: Exception) {}
+    })
+
+    val activePeers = ConcurrentHashMap.newKeySet<PeerConnection>()
+
     // start all peers bg process'
     val peerJobs = peers.map { (ip, port) ->
+        val peer = PeerConnection(InetSocketAddress(ip, port), input)
         GlobalScope.launch {
-            val peer = PeerConnection(InetSocketAddress(ip, port), input)
             peer.start(sha1, peerId)
+            activePeers.add(peer)
+        }
+        peer
+    }.toSet()
+
+    // peer requester
+    GlobalScope.launch {
+        while (isActive) {
+            val newPeers = processFile(file).peers.map { (ip, port) ->
+                PeerConnection(InetSocketAddress(ip, port), input)
+            }.toMutableSet()
+            newPeers.removeAll(activePeers)
+
+            newPeers.forEach { p ->
+                GlobalScope.launch {
+                    p.start(sha1, peerId)
+                    activePeers.add(p)
+                }
+            }
+            progress.peers = activePeers.size
+            progress.printProgress()
+            delay(1000 * 30) // sleep 30 sec
         }
     }
 
@@ -61,11 +118,14 @@ fun main(args: Array<String>) {
         // init all pieces
         val piecesToPeers = mutableMapOf<Int, PieceInfo>()
         for (i in 0 until numPieces) {
-            val piece = PieceInfo(i, if (i == numPieces - 1) lastPieceLength else pieceLength, false)
-            piecesToPeers[i] = piece
+            if (!presentPieces.contains(i)) {
+                val piece = PieceInfo(i, if (i == numPieces - 1) lastPieceLength.toInt() else pieceLength.toInt(), false)
+                piecesToPeers[i] = piece
+            }
         }
 
-        val progress = Progress(numPieces, pieceLength)
+        progress.state = "Downloading"
+        progress.printProgress()
         val ticker = ticker(delayMillis = 1000, initialDelayMillis = 0, mode = TickerMode.FIXED_DELAY)
         while (true) {
             when (val message = select<SupervisorMsg> {
@@ -75,9 +135,9 @@ fun main(args: Array<String>) {
                 is HasPiece -> {
                     val (id, has, peer) = message
                     if (has) {
-                        piecesToPeers[id]?.peers!!.add(peer)
+                        piecesToPeers[id]?.peers?.add(peer)
                     } else {
-                        piecesToPeers[id]?.peers!!.remove(peer)
+                        piecesToPeers[id]?.peers?.remove(peer)
                     }
                     val downloads = initiateDownloadIfNecessary(
                         piecesToPeers,
@@ -100,11 +160,15 @@ fun main(args: Array<String>) {
                     for (d in downloads) {
                         progress.setInProgress(d)
                     }
+
                 }
                 is Closed -> {
                     for ((_, v) in piecesToPeers) {
                         v.peers.remove(message.peer)
                     }
+                    activePeers.remove(message.peer)
+                    progress.peers = activePeers.size
+                    progress.printProgress()
                 }
                 is DownloadCanceledRequest -> {
                     downloadsInProgress--
@@ -112,13 +176,21 @@ fun main(args: Array<String>) {
                 }
                 is Piece -> {
                     downloadsInProgress--
-                    piecesToPeers.remove(message.id)
-                    diskChannel.send(message)
-                    progress.setDone(message.id)
-                    printProgress(progress)
-                    if (piecesToPeers.isEmpty()) {
-                        diskChannel.close()
-                        return@launch
+                    val hashEqual = computePieceHash(message, torrentData)
+                    if (!hashEqual) {
+                        piecesToPeers[message.id]!!.inProgress = false
+                        progress.setEmpty(message.id)
+                    } else {
+                        piecesToPeers.remove(message.id)
+                        diskChannel.send(message)
+                        progress.setDone(message.id)
+                        progress.printProgress()
+                        if (piecesToPeers.isEmpty()) {
+                            progress.state = "Done"
+                            progress.printProgress()
+                            diskChannel.close()
+                            return@launch
+                        }
                     }
                 }
                 else -> println(message)
@@ -133,10 +205,11 @@ fun main(args: Array<String>) {
     }
 }
 
-private fun printProgress(progress: Progress) {
-    System.out.print("\r")
-    System.out.print("${progress.getProgressPercent()} ${progress.getProgressString()} ${progress.getBandwidth()}")
-    System.out.flush()
+fun computePieceHash(message: Piece, torrentData: TorrentData): Boolean {
+    val expectedHash =
+        torrentData.torrent["info"]!!.map["pieces"]!!.bytes.copyOfRange(message.id * 20, message.id * 20 + 20)
+    val pieceHash = SHA1.calculate(message.bytes)
+    return Arrays.equals(expectedHash, pieceHash)
 }
 
 // returns amount of downloads initiated

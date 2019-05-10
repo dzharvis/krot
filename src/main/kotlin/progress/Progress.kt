@@ -5,13 +5,19 @@ object InProgress: ProgressState()
 object Done: ProgressState()
 object Empty: ProgressState()
 
-class Progress(private val numPieces: Int, private val pieceSize: Int) {
+class Progress(private val numPieces: Int, private val pieceSize: Long) {
     private val progress: Array<ProgressState> = Array(numPieces) { Empty }
     private val bandwidthWindow = mutableListOf<Long>()
+    var state = "Init"
+    var peers = 0
 
     fun setDone(id: Int) {
         progress[id] = Done
         recalcBandwidth()
+    }
+
+    fun setEmpty(id: Int) {
+        progress[id] = Empty
     }
 
     fun setInProgress(id: Int) {
@@ -22,7 +28,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Int) {
     private fun recalcBandwidth() {
         val currentTime = System.currentTimeMillis()
         bandwidthWindow.add(currentTime)
-        while (bandwidthWindow.size > 1000) {
+        while (bandwidthWindow.size > 5000) {
             bandwidthWindow.removeAt(0)
         }
         bandwidthWindow.removeIf { it < currentTime - 5000 }
@@ -47,9 +53,15 @@ class Progress(private val numPieces: Int, private val pieceSize: Int) {
 
     fun getBandwidth(): String {
         val currentTime = System.currentTimeMillis()
-        val bytesReceived = bandwidthWindow.filter { it >= currentTime - 5000 }.fold(0, { acc, _ -> acc + pieceSize })
+        val bytesReceived = bandwidthWindow.filter { it >= currentTime - 5000 }.fold(0L, { acc, _ -> acc + pieceSize })
         val bps = bytesReceived / 1024 / 5
         return "$bps KB/sec"
+    }
+
+    fun printProgress() {
+        System.out.print("\r")
+        System.out.print("$state ${getProgressPercent()} : ${if (state.equals("Downloading")) "from ${peers} peers" else ""} ${getProgressString()} ${getBandwidth()}")
+        System.out.flush()
     }
 
     override fun toString(): String {

@@ -3,6 +3,7 @@ package tracker
 import be.adaxisoft.bencode.BDecoder
 import be.adaxisoft.bencode.BEncodedValue
 import be.adaxisoft.bencode.BEncoder
+import main.SHA1
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
@@ -11,20 +12,14 @@ import java.net.URLEncoder
 import java.nio.charset.Charset
 import java.security.MessageDigest
 
-fun sha1(bytes: ByteArray): ByteArray {
-    val md = MessageDigest.getInstance("SHA-1")
-    md.update(bytes, 0, bytes.size)
-    return md.digest()!!
-}
-
 fun generatePeerId(): ByteArray {
-    return sha1("123".toByteArray())
+    return SHA1.calculate("123".toByteArray())
 }
 
 fun getSHA1(info: Any): ByteArray {
     val out = ByteArrayOutputStream()
     BEncoder.encode(info, out)
-    return sha1(out.toByteArray())
+    return SHA1.calculate(out.toByteArray())
 }
 
 fun parsePeers(peers: ByteArray): List<PeerAddr> {
@@ -71,8 +66,8 @@ data class TorrentData(
     val sha1: ByteArray,
     val peerId: ByteArray,
     val numPieces: Int,
-    val pieceLength: Int,
-    val lastPieceLength: Int
+    val pieceLength: Long,
+    val lastPieceLength: Long
 )
 
 fun processFile(file: String): TorrentData {
@@ -81,9 +76,9 @@ fun processFile(file: String): TorrentData {
     val sha1 = getSHA1(torrent["info"]!!)
     val peerId = generatePeerId()
     val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
-    val pieceLength = torrent["info"]!!.map["piece length"]!!.int
+    val pieceLength = torrent["info"]!!.map["piece length"]!!.long
     val peers = getPeers(String(sha1, charset), String(peerId, charset), torrent["announce"]!!.string)
-    val numBytes = torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.int }.fold(0, { acc, i -> acc + i })
+    val numBytes = torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
     val diff = numPieces * pieceLength - numBytes
     return TorrentData(torrent, peers, sha1, peerId, numPieces, pieceLength, pieceLength - diff)
 }
