@@ -58,14 +58,12 @@ fun main(args: Array<String>) {
     val diskChannel = Channel<Piece>(50)
 
     progress.state = "Hash check"
-    progress.printProgress()
 
     val presentPieces = Disk.checkDownloadedPieces(torrentData, dstFolder, progress).toSet()
     val diskJob = Disk.initWriter(diskChannel, torrentData, dstFolder)
 
     if (presentPieces.size == numPieces) {
         progress.state = "Done"
-        progress.printProgress()
         return
     }
 
@@ -75,7 +73,8 @@ fun main(args: Array<String>) {
             diskChannel.close()
             runBlocking { diskJob.join() }
             Disk.close()
-        } catch (ex: Exception) {}
+        } catch (ex: Exception) {
+        }
     })
 
     val activePeers = ConcurrentHashMap.newKeySet<PeerConnection>()
@@ -85,13 +84,15 @@ fun main(args: Array<String>) {
         val peer = PeerConnection(InetSocketAddress(ip, port), input)
         GlobalScope.launch {
             peer.start(sha1, peerId)
-            activePeers.add(peer)
         }
+        activePeers.add(peer)
         peer
     }.toSet()
 
+
     // peer requester
     GlobalScope.launch {
+        delay(1000 * 60)
         while (isActive) {
             val newPeers = processFile(file).peers.map { (ip, port) ->
                 PeerConnection(InetSocketAddress(ip, port), input)
@@ -101,12 +102,10 @@ fun main(args: Array<String>) {
             newPeers.forEach { p ->
                 GlobalScope.launch {
                     p.start(sha1, peerId)
-                    activePeers.add(p)
                 }
+                activePeers.add(p)
             }
-            progress.peers = activePeers.size
-            progress.printProgress()
-            delay(1000 * 30) // sleep 30 sec
+            delay(1000 * 60)
         }
     }
 
@@ -119,13 +118,13 @@ fun main(args: Array<String>) {
         val piecesToPeers = mutableMapOf<Int, PieceInfo>()
         for (i in 0 until numPieces) {
             if (!presentPieces.contains(i)) {
-                val piece = PieceInfo(i, if (i == numPieces - 1) lastPieceLength.toInt() else pieceLength.toInt(), false)
+                val piece =
+                    PieceInfo(i, if (i == numPieces - 1) lastPieceLength.toInt() else pieceLength.toInt(), false)
                 piecesToPeers[i] = piece
             }
         }
 
         progress.state = "Downloading"
-        progress.printProgress()
         val ticker = ticker(delayMillis = 1000, initialDelayMillis = 0, mode = TickerMode.FIXED_DELAY)
         while (true) {
             when (val message = select<SupervisorMsg> {
@@ -168,13 +167,13 @@ fun main(args: Array<String>) {
                     }
                     activePeers.remove(message.peer)
                     progress.peers = activePeers.size
-                    progress.printProgress()
                 }
                 is DownloadCanceledRequest -> {
                     downloadsInProgress--
                     piecesToPeers[message.id]?.inProgress = false
                 }
                 is Piece -> {
+                    progress.peers = activePeers.size
                     downloadsInProgress--
                     val hashEqual = computePieceHash(message, torrentData)
                     if (!hashEqual) {
@@ -184,10 +183,8 @@ fun main(args: Array<String>) {
                         piecesToPeers.remove(message.id)
                         diskChannel.send(message)
                         progress.setDone(message.id)
-                        progress.printProgress()
                         if (piecesToPeers.isEmpty()) {
                             progress.state = "Done"
-                            progress.printProgress()
                             diskChannel.close()
                             return@launch
                         }

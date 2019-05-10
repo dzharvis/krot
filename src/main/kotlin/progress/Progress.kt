@@ -9,20 +9,31 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
     private val progress: Array<ProgressState> = Array(numPieces) { Empty }
     private val bandwidthWindow = mutableListOf<Long>()
     var state = "Init"
+        set(value) {
+            field = value
+            printProgress()
+        }
     var peers = 0
+        set(value) {
+            field = value
+            printProgress()
+        }
 
     fun setDone(id: Int) {
         progress[id] = Done
         recalcBandwidth()
+        printProgress()
     }
 
     fun setEmpty(id: Int) {
         progress[id] = Empty
+        printProgress()
     }
 
     fun setInProgress(id: Int) {
         progress[id] = InProgress
         recalcBandwidth()
+        printProgress()
     }
 
     private fun recalcBandwidth() {
