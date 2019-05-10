@@ -15,9 +15,7 @@ import kotlin.coroutines.resumeWithException
 // Use as thread/coroutine local instance
 class AsyncTcpClient {
 
-    @Volatile
     var timeout = 2000L
-    @Volatile
     var timeUnit = TimeUnit.MILLISECONDS
 
     class AsyncCompletionHandler<T> : CompletionHandler<T, Continuation<T>> {

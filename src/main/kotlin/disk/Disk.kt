@@ -10,39 +10,43 @@ import java.io.RandomAccessFile
 data class FileOperation(val file: List<String>, val offset: Long, val data: ByteArray)
 
 object Disk {
-    val filesCache = mutableMapOf<String, RandomAccessFile>()
+    private val filesCache = mutableMapOf<String, RandomAccessFile>()
 
-    fun initWriter(input: Channel<Piece>, torrent: TorrentData): Job {
+    fun initWriter(input: Channel<Piece>, torrent: TorrentData, folder: String): Job {
         val pieceLength = torrent.pieceLength
         val pieceBufferSize = 100 * 1024 * 1024 // 100MB
         val bufferLength = pieceBufferSize / pieceLength
         return GlobalScope.launch {
-            val pieceBuffer = mutableListOf<Piece>()
+            val pieceBuffer = ArrayList<Piece>()
             for (piece in input) {
                 pieceBuffer.add(piece)
                 if (pieceBuffer.size > bufferLength) {
-                    writeToDisk(pieceBuffer, torrent)
+                    writeToDisk(pieceBuffer, torrent, folder)
                     pieceBuffer.clear()
                 }
             }
-            writeToDisk(pieceBuffer, torrent)
+            writeToDisk(pieceBuffer, torrent, folder)
         }
     }
 
-    private suspend fun writeToDisk(pieces: List<Piece>, torrent: TorrentData) {
+    private suspend fun writeToDisk(
+        pieces: List<Piece>,
+        torrent: TorrentData,
+        folder: String
+    ) {
         for (piece in pieces.sortedBy { it.id }) {
             val fileOperations = prepare(piece, torrent).groupBy { it.file }
             withContext(Dispatchers.IO) {
                 for ((path, fileOperations) in fileOperations) {
-                    val fileName = "/tmp/${path.joinToString("/")}"
-                    val raf = if (!filesCache.contains(fileName)) {
-                        val f = File(fileName)
+                    val parent = File(folder)
+                    val f = File(parent, path.joinToString("/"))
+                    val raf = if (!filesCache.contains(f.absolutePath)) {
                         f.parentFile.mkdirs()
                         val file = RandomAccessFile(f, "rw")
-                        filesCache[fileName] = file
+                        filesCache[f.absolutePath] = file
                         file
                     } else {
-                        filesCache[fileName]!!
+                        filesCache[f.absolutePath]!!
                     }
                     for ((_, offset, data) in fileOperations) {
                         raf.seek(offset)
@@ -59,7 +63,7 @@ object Disk {
         }
     }
 
-    // shoto slozhno kakto polushilos' no dolzhno rabotat' ))))0
+    // TODO Simplify, make readable
     private fun prepare(piece: Piece, torrentData: TorrentData): List<FileOperation> {
         val torrent = torrentData.torrent
         val pieceLength = torrentData.pieceLength

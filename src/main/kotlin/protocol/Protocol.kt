@@ -26,10 +26,10 @@ data class Chunk(val index: Int, val begin: Int, val block: ByteArray) : Message
 // Use as thread/coroutine local instance
 class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: AsynchronousSocketChannel) {
 
-    val tcpClient = AsyncTcpClient() // uses asyncChannel for most operations, asyncChannels are thread safe
-    val bb = ByteBuffer.allocate(bufferSize)
+    private val tcpClient = AsyncTcpClient() // uses asyncChannel for most operations, asyncChannels are thread safe
+    private val bb = ByteBuffer.allocate(bufferSize)
 
-    fun log(msg: String) {
+    private fun log(msg: String) {
 //        println("[$addr] $msg")
     }
 
@@ -48,7 +48,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
         bb.clear()
         tcpClient.read(channel, bb, 4)
         bb.flip()
-        val length = bb.getInt()
+        val length = bb.int
 
         if (length == 0) { // keep-alive
             // TODO respond with keep-alive too
@@ -78,7 +78,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
 
     private fun parse(m: RawMessage): Message {
         return when (m.id.toInt()) {
-            // keep-alive skipped
+            // keep-alive skipped (it doesn't has an id)
             0 -> Choke
             1 -> Unchoke
             2 -> Interested

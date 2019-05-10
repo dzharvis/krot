@@ -11,24 +11,25 @@ import java.net.URLEncoder
 import java.nio.charset.Charset
 import java.security.MessageDigest
 
-fun generatePeerId(): ByteArray {
+fun sha1(bytes: ByteArray): ByteArray {
     val md = MessageDigest.getInstance("SHA-1")
-    md.update("123".toByteArray(), 0, 3)
+    md.update(bytes, 0, bytes.size)
     return md.digest()!!
+}
+
+fun generatePeerId(): ByteArray {
+    return sha1("123".toByteArray())
 }
 
 fun getSHA1(info: Any): ByteArray {
     val out = ByteArrayOutputStream()
     BEncoder.encode(info, out)
-
-    val md = MessageDigest.getInstance("SHA-1")
-    md.update(out.toByteArray(), 0, out.size())
-    return md.digest()!!
+    return sha1(out.toByteArray())
 }
 
 fun parsePeers(peers: ByteArray): List<PeerAddr> {
     return (0 until peers.size step 6).map { i ->
-        val ip1 = (peers[i] + 0) and 0xff
+        val ip1 = (peers[i] + 0) and 0xff // + 0 for int casting. I don't like .toInt()
         val ip2 = (peers[i + 1] + 0) and 0xff
         val ip3 = (peers[i + 2] + 0) and 0xff
         val ip4 = (peers[i + 3] + 0) and 0xff
@@ -57,8 +58,7 @@ private fun getPeers(infoHash: String, peerIdHash: String, url: String): List<Pe
     try {
         conn.requestMethod = "GET"
         val response = BDecoder(conn.inputStream.buffered()).decodeMap().map
-        val peers = parsePeers(response["peers"]!!.bytes)
-        return peers
+        return parsePeers(response["peers"]!!.bytes)
     } finally {
         conn.disconnect()
     }
@@ -83,7 +83,7 @@ fun processFile(file: String): TorrentData {
     val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
     val pieceLength = torrent["info"]!!.map["piece length"]!!.int
     val peers = getPeers(String(sha1, charset), String(peerId, charset), torrent["announce"]!!.string)
-    val numBytes = torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.int }.fold(0, {acc, i -> acc + i})
+    val numBytes = torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.int }.fold(0, { acc, i -> acc + i })
     val diff = numPieces * pieceLength - numBytes
     return TorrentData(torrent, peers, sha1, peerId, numPieces, pieceLength, pieceLength - diff)
 }

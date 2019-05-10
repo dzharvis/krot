@@ -23,6 +23,16 @@ dependencies {
     compile 'org.jetbrains.kotlinx:kotlinx-coroutines-core:1.2.1'
 }
 
+jar {
+    manifest {
+        attributes "Main-Class": "main.MainKt"
+    }
+
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
 compileKotlin {
     kotlinOptions.jvmTarget = "1.8"
 }

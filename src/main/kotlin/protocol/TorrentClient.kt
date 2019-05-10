@@ -54,7 +54,7 @@ class PeerConnection(
 
                 // read supervisor messages and write requests to to peer
                 launch {
-                    // 1.5 send keepalive
+                    // 1.5 send keep-alive
                     val ticker = ticker(delayMillis = 1000 * 90, initialDelayMillis = 1000 * 60, mode = TickerMode.FIXED_DELAY)
                     val protocol = Protocol(addr, 8192, channel)
                     while (isActive) {
@@ -107,10 +107,8 @@ class PeerConnection(
         protocol: Protocol
     ): Piece {
         if (choked) {
-            // interested byte
             protocol.writeMessage(Interested) // i don't know if i should send interested again after choking
             log("Interested byte sent")
-            // wait unchoke
             waitUnchoke(peerMessages)
             log("unchoke here")
         }
@@ -121,7 +119,6 @@ class PeerConnection(
         for (i in 0 until pieceLength step defaultChunkSize) {
             val chunkSize = if (i + defaultChunkSize > pieceLength) (pieceLength - i) else defaultChunkSize
             log("chunk size selected: $chunkSize")
-            // wait piece
             log("requesting piece [$pieceLength, $id] $i, $defaultChunkSize")
             protocol.writeMessage(Request(id, i, chunkSize))
             when (val response = peerMessages.receive()) {
@@ -132,7 +129,7 @@ class PeerConnection(
                 is Choke -> {
                     choked = true
                     // TODO limit number of retries
-                    return downloadPiece(id, pieceLength, peerMessages, protocol) // retry
+                    return downloadPiece(id, pieceLength, peerMessages, protocol) // stupid retry
                 }
                 else -> throw InvalidObjectException("Chunk expected, $response received")
             }

@@ -5,21 +5,21 @@ object InProgress: ProgressState()
 object Done: ProgressState()
 object Empty: ProgressState()
 
-class Progress(val numPieces: Int, val pieceSize: Int) {
+class Progress(private val numPieces: Int, private val pieceSize: Int) {
     private val progress: Array<ProgressState> = Array(numPieces) { Empty }
     private val bandwidthWindow = mutableListOf<Long>()
 
     fun setDone(id: Int) {
         progress[id] = Done
-        recalcBendwidth()
+        recalcBandwidth()
     }
 
     fun setInProgress(id: Int) {
         progress[id] = InProgress
-        recalcBendwidth()
+        recalcBandwidth()
     }
 
-    private fun recalcBendwidth() {
+    private fun recalcBandwidth() {
         val currentTime = System.currentTimeMillis()
         bandwidthWindow.add(currentTime)
         while (bandwidthWindow.size > 1000) {
@@ -30,14 +30,13 @@ class Progress(val numPieces: Int, val pieceSize: Int) {
 
     fun getProgressString(): String {
         val chunks = numPieces / 50
-        val str = progress.toList().chunked(chunks).map { chunk ->
+        return progress.toList().chunked(chunks).joinToString("", "[", "]") { chunk ->
             when {
                 chunk.all { it == Done } -> "#"
                 chunk.any { it == InProgress || it == Done } -> "~"
                 else -> "-"
             }
-        }.joinToString("")
-        return "[$str]"
+        }
     }
 
     fun getProgressPercent(): String {

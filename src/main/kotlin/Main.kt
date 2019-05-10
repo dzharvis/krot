@@ -29,16 +29,20 @@ data class PieceInfo(
     val peers: MutableSet<PeerConnection> = mutableSetOf()
 )
 
-fun main() {
+fun main(args: Array<String>) {
 
-    val torrentData = processFile("/Users/dzharvis/Downloads/winrar.torrent")
+    if (args.size < 2) {
+        error("Provide torrent file location as first argument and destination folder as second parameter")
+    }
+    val file = args[0]
+    val dstFolder = args[1]
+
+    val torrentData = processFile(file)
     val (_, peers, sha1, peerId, numPieces, pieceLength, lastPieceLength) = torrentData
 
     val input = Channel<SupervisorMsg>(100) // small buffer just in case
-
     val diskChannel = Channel<Piece>(50)
-
-    val diskJob = Disk.initWriter(diskChannel, torrentData)
+    val diskJob = Disk.initWriter(diskChannel, torrentData, dstFolder)
 
     println("Found ${peers.size} peers")
     // start all peers bg process'
@@ -53,9 +57,9 @@ fun main() {
     val app = GlobalScope.launch {
         //TODO use bandwidth check. Slow download speed = increase simultaneous downloads
         val maxSimultaneousDownloads = 40
-        var downloadsInProgess = 0
+        var downloadsInProgress = 0
         // init all pieces
-        var piecesToPeers = mutableMapOf<Int, PieceInfo>()
+        val piecesToPeers = mutableMapOf<Int, PieceInfo>()
         for (i in 0 until numPieces) {
             val piece = PieceInfo(i, if (i == numPieces - 1) lastPieceLength else pieceLength, false)
             piecesToPeers[i] = piece
@@ -71,16 +75,16 @@ fun main() {
                 is HasPiece -> {
                     val (id, has, peer) = message
                     if (has) {
-                        piecesToPeers.get(id)?.peers?.add(peer)
+                        piecesToPeers[id]?.peers!!.add(peer)
                     } else {
-                        piecesToPeers.get(id)?.peers?.remove(peer)
+                        piecesToPeers[id]?.peers!!.remove(peer)
                     }
                     val downloads = initiateDownloadIfNecessary(
                         piecesToPeers,
                         maxSimultaneousDownloads,
-                        downloadsInProgess
+                        downloadsInProgress
                     )
-                    downloadsInProgess += downloads.size
+                    downloadsInProgress += downloads.size
                     for (d in downloads) {
                         progress.setInProgress(d)
                     }
@@ -90,9 +94,9 @@ fun main() {
                     val downloads = initiateDownloadIfNecessary(
                         piecesToPeers,
                         maxSimultaneousDownloads,
-                        downloadsInProgess
+                        downloadsInProgress
                     )
-                    downloadsInProgess += downloads.size
+                    downloadsInProgress += downloads.size
                     for (d in downloads) {
                         progress.setInProgress(d)
                     }
@@ -103,11 +107,11 @@ fun main() {
                     }
                 }
                 is DownloadCanceledRequest -> {
-                    downloadsInProgess--
+                    downloadsInProgress--
                     piecesToPeers[message.id]?.inProgress = false
                 }
                 is Piece -> {
-                    downloadsInProgess--
+                    downloadsInProgress--
                     piecesToPeers.remove(message.id)
                     diskChannel.send(message)
                     progress.setDone(message.id)
@@ -124,8 +128,8 @@ fun main() {
 
     runBlocking {
         diskJob.join()
-        app.join()
         Disk.close()
+        app.join()
     }
 }
 
@@ -149,7 +153,7 @@ fun initiateDownloadIfNecessary(
             .filter { piece ->
                 !piece.inProgress && piece.peers.isNotEmpty()
             }
-            .shuffled()
+            .shuffled() // very expensive operation
             .take(amount)
             .map { piece ->
                 val peer = piece.peers.random()
