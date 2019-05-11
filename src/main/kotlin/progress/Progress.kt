@@ -50,6 +50,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
         return progress.toList().chunked(chunks).joinToString("", "[", "]") { chunk ->
             when {
                 chunk.all { it == Done } -> "#"
+                chunk.count { it == Done } >= chunks/2 -> "="
                 chunk.any { it == InProgress || it == Done } -> "~"
                 else -> "-"
             }
