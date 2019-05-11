@@ -223,9 +223,9 @@ fun initiateDownloadIfNecessary(
             .filter { piece ->
                 !piece.inProgress && piece.peers.isNotEmpty()
             }
-            .shuffled() // very expensive operation
+            .sortedBy { it.peers.size } // rarest first
             .take(amount)
-            .map { piece ->
+            .mapNotNull { piece ->
                 val peer = piece.peers.random()
                 val offer = try {
                     peer.input.offer(DownloadRequest(piece.id, piece.length))
@@ -236,6 +236,6 @@ fun initiateDownloadIfNecessary(
                     piece.inProgress = true
                     piece.id
                 } else
-                    -1
-            }.filterNot { it == -1 }
+                    null
+            }.toList()
 }
