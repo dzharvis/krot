@@ -15,7 +15,6 @@ import java.net.*
 import java.security.MessageDigest
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.ConcurrentSkipListSet
 
 // messages for communication with peers
 sealed class SupervisorMsg
@@ -166,14 +165,14 @@ fun main(args: Array<String>) {
                         v.peers.remove(message.peer)
                     }
                     activePeers.remove(message.peer)
-                    progress.peers = activePeers.size
+                    progress.numPeers = activePeers.size
                 }
                 is DownloadCanceledRequest -> {
                     downloadsInProgress--
                     piecesToPeers[message.id]?.inProgress = false
                 }
                 is Piece -> {
-                    progress.peers = activePeers.size
+                    progress.numPeers = activePeers.size
                     downloadsInProgress--
                     val hashEqual = computePieceHash(message, torrentData)
                     if (!hashEqual) {

@@ -13,7 +13,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
             field = value
             printProgress()
         }
-    var peers = 0
+    var numPeers = 0
         set(value) {
             field = value
             printProgress()
@@ -72,7 +72,8 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
 
     fun printProgress() {
         System.out.print("\r")
-        System.out.print("$state ${getProgressPercent()} : ${if (state.equals("Downloading")) "from ${peers} peers" else ""} ${getProgressString()} ${getBandwidth()}")
+        val peersStr = if (state.equals("Downloading")) "from ${numPeers} numPeers" else ""
+        System.out.print("$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}")
         System.out.flush()
     }
 
