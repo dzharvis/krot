@@ -7,6 +7,7 @@ import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.AsynchronousSocketChannel
 import java.nio.charset.Charset
+import java.util.concurrent.TimeUnit
 
 
 data class RawMessage(val id: Byte, val body: ByteArray)
@@ -37,7 +38,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
     suspend fun connect(sha1: ByteArray, peerId: ByteArray) {
         // there is no possibility to provide a timeout to an asyncChannel
         // thus set timeout on a coroutine itself
-        withTimeout(tcpClient.timeout) { tcpClient.connect(channel, addr) }
+        withTimeout(2000L) { tcpClient.connect(channel, addr) }
         log("Connected to $addr")
 
         doHandshake(sha1, peerId)
@@ -108,7 +109,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
             is Choke,
             is Unchoke,
             is Interested,
-            is NotInterested -> {
+            is NotInterested -> with(bb) {
                 bb.clear()
                 bb.putInt(1)
                 bb.put(message.id)
@@ -156,16 +157,16 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
         bb.put(sha1)
         bb.put(peerId)
         bb.flip()
-        tcpClient.write(channel, bb)
+        tcpClient.write(channel, bb, 5000, TimeUnit.SECONDS)
         bb.clear()
 
         // read length prefix
-        tcpClient.read(channel, bb, 1)
+        tcpClient.read(channel, bb, 1, 5000, TimeUnit.SECONDS)
         bb.flip()
         val protocolLength = bb.get().toInt() and 0xff
         bb.clear()
         // read handshake response
-        tcpClient.read(channel, bb, protocolLength + 8 + 20 + 20)
+        tcpClient.read(channel, bb, protocolLength + 8 + 20 + 20, 5000, TimeUnit.SECONDS)
         bb.flip()
 
         val b = ByteArray(bb.limit())

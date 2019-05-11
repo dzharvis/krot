@@ -15,9 +15,6 @@ import kotlin.coroutines.resumeWithException
 // Use as thread/coroutine local instance
 class AsyncTcpClient {
 
-    var timeout = 2000L
-    var timeUnit = TimeUnit.MILLISECONDS
-
     class AsyncCompletionHandler<T> : CompletionHandler<T, Continuation<T>> {
         override fun completed(result: T, attachment: Continuation<T>) = attachment.resume(result)
         override fun failed(exc: Throwable, attachment: Continuation<T>) {
@@ -31,32 +28,53 @@ class AsyncTcpClient {
         }
     }
 
-    suspend fun read(ch: AsynchronousSocketChannel, bb: ByteBuffer): Int {
+    suspend fun read(
+        ch: AsynchronousSocketChannel,
+        bb: ByteBuffer,
+        timeout: Long = 1L,
+        timeUnit: TimeUnit = TimeUnit.MINUTES
+    ): Int {
         return suspendCancellableCoroutine { continuation ->
             ch.read(bb, timeout, timeUnit, continuation, AsyncCompletionHandler<Int>())
         }
     }
 
-    suspend fun read(ch: AsynchronousSocketChannel, bb: ByteBuffer, n: Int) {
+    suspend fun read(
+        ch: AsynchronousSocketChannel,
+        bb: ByteBuffer,
+        n: Int,
+        timeout: Long = 1,
+        timeUnit: TimeUnit = TimeUnit.MINUTES
+    ) {
         val slice = bb.slice()
         slice.limit(n)
         while (slice.hasRemaining()) {
-            if (read(ch, slice) < 0) {
+            if (read(ch, slice, timeout, timeUnit) < 0) {
                 throw ClosedChannelException()
             }
         }
         bb.position(bb.position() + n)
     }
 
-    suspend fun readFull(ch: AsynchronousSocketChannel, bb: ByteBuffer) {
+    suspend fun readFull(
+        ch: AsynchronousSocketChannel,
+        bb: ByteBuffer,
+        timeout: Long = 1L,
+        timeUnit: TimeUnit = TimeUnit.MINUTES
+    ) {
         while (bb.hasRemaining()) {
-            if (read(ch, bb) < 0) {
+            if (read(ch, bb, timeout, timeUnit) < 0) {
                 throw ClosedChannelException()
             }
         }
     }
 
-    suspend fun write(ch: AsynchronousSocketChannel, bb: ByteBuffer): Int {
+    suspend fun write(
+        ch: AsynchronousSocketChannel,
+        bb: ByteBuffer,
+        timeout: Long = 2000L,
+        timeUnit: TimeUnit = TimeUnit.MILLISECONDS
+    ): Int {
         return suspendCancellableCoroutine { continuation ->
             ch.write(bb, timeout, timeUnit, continuation, AsyncCompletionHandler<Int>())
         }
