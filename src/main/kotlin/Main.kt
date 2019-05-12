@@ -11,10 +11,12 @@ import main.progress.Progress
 import protocol.PeerConnection
 import tracker.TorrentData
 import tracker.processFile
+import utils.sha1
 import java.net.*
 import java.security.MessageDigest
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 // messages for communication with peers
 sealed class SupervisorMsg
@@ -32,14 +34,6 @@ data class PieceInfo(
     var inProgress: Boolean,
     val peers: MutableSet<PeerConnection> = mutableSetOf()
 )
-
-object SHA1 {
-    fun calculate(bytes: ByteArray): ByteArray {
-        val md = MessageDigest.getInstance("SHA-1")
-        md.update(bytes, 0, bytes.size)
-        return md.digest()!!
-    }
-}
 
 fun main(args: Array<String>) {
 
@@ -88,11 +82,10 @@ fun main(args: Array<String>) {
         peer
     }.toSet()
 
-
     // peer requester
     GlobalScope.launch {
-        delay(1000 * 60)
         while (isActive) {
+            delay(1000 * 60)
             val newPeers = processFile(file).peers.map { (ip, port) ->
                 PeerConnection(InetSocketAddress(ip, port), input)
             }.toMutableSet()
@@ -104,7 +97,6 @@ fun main(args: Array<String>) {
                 }
                 activePeers.add(p)
             }
-            delay(1000 * 60)
         }
     }
 
@@ -204,7 +196,7 @@ fun main(args: Array<String>) {
 fun computePieceHash(message: Piece, torrentData: TorrentData): Boolean {
     val expectedHash =
         torrentData.torrent["info"]!!.map["pieces"]!!.bytes.copyOfRange(message.id * 20, message.id * 20 + 20)
-    val pieceHash = SHA1.calculate(message.bytes)
+    val pieceHash = sha1(message.bytes)
     return Arrays.equals(expectedHash, pieceHash)
 }
 

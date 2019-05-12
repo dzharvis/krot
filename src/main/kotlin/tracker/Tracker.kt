@@ -3,23 +3,22 @@ package tracker
 import be.adaxisoft.bencode.BDecoder
 import be.adaxisoft.bencode.BEncodedValue
 import be.adaxisoft.bencode.BEncoder
-import main.SHA1
+import utils.sha1
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.Charset
-import java.security.MessageDigest
 
 fun generatePeerId(): ByteArray {
-    return SHA1.calculate("123".toByteArray())
+    return sha1("123".toByteArray()) // TODO generate normal peer id
 }
 
-fun getSHA1(info: Any): ByteArray {
+fun infoDictSHA1(info: Any): ByteArray {
     val out = ByteArrayOutputStream()
     BEncoder.encode(info, out)
-    return SHA1.calculate(out.toByteArray())
+    return sha1(out.toByteArray())
 }
 
 fun parsePeers(peers: ByteArray): List<PeerAddr> {

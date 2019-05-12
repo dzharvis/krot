@@ -3,9 +3,9 @@ package disk
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import main.Piece
-import main.SHA1
 import main.progress.Progress
 import tracker.TorrentData
+import utils.sha1
 import java.io.File
 import java.io.RandomAccessFile
 import java.util.*
@@ -77,7 +77,7 @@ object Disk {
             val fileBytes = ByteArray((intersection.y - intersection.x).toInt())
             raf.seek(intersection.x - fileOffset)
             val bytesRead = raf.read(fileBytes)
-            if(bytesRead != fileBytes.size) return pieceBytes
+            if (bytesRead != fileBytes.size) return pieceBytes
 
             pieceBytes += fileBytes
             fileOffset += fileLength
@@ -86,7 +86,7 @@ object Disk {
                 break
             }
         }
-        return SHA1.calculate(pieceBytes)
+        return sha1(pieceBytes)
     }
 
     fun initWriter(input: Channel<Piece>, torrent: TorrentData, folder: String): Job {
