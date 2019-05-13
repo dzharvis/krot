@@ -52,7 +52,7 @@ class PeerConnection(
                     }
                 }
 
-                // read supervisor messages and write requests to to peer
+                // read supervisor messages and write requests to peer
                 launch {
                     // 1.5 send keep-alive
                     val ticker = ticker(delayMillis = 1000 * 90, initialDelayMillis = 1000 * 60, mode = TickerMode.FIXED_DELAY)

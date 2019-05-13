@@ -58,26 +58,75 @@ private fun getPeers(infoHash: String, peerIdHash: String, url: String): List<Pe
     }
 }
 
+data class AnnounceResp(
+    val failure: String?,
+    val warn: String?,
+    val interval: Long,
+    val minInterval: Long?,
+    val trackerId: String?,
+    val complete: Long,
+    val incomplete: Long
+)
+
 data class PeerAddr(val host: String, val port: Int)
+data class TorrentFile(val length: Long, val path: List<String>)
+//data class Info(val piecesSha1: ByteArray, val pieceLength: Long, val files: List<TorrentFile>)
+
 data class TorrentData(
-    val torrent: Map<String, BEncodedValue>,
-    val peers: List<PeerAddr>,
-    val sha1: ByteArray,
-    val peerId: ByteArray,
-    val numPieces: Int,
     val pieceLength: Long,
-    val lastPieceLength: Long
+    val lastPieceLength: Long,
+    val numPieces: Int,
+    val private: Boolean,
+
+    val folder: String?,
+    val files: List<TorrentFile>,
+
+    val peers: List<PeerAddr>,
+    val infoSHA1: ByteArray,
+    val peerId: ByteArray,
+
+    val piecesSha1: ByteArray
 )
 
 fun processFile(file: String): TorrentData {
     val charset = Charset.forName("Windows-1251")
     val torrent = BDecoder(File(file).inputStream()).decodeMap().map
-    val sha1 = getSHA1(torrent["info"]!!)
+    val infoSHA1 = infoDictSHA1(torrent["info"]!!)
     val peerId = generatePeerId()
+    val private = torrent["info"]!!.map["private"]?.int == 1
     val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
     val pieceLength = torrent["info"]!!.map["piece length"]!!.long
-    val peers = getPeers(String(sha1, charset), String(peerId, charset), torrent["announce"]!!.string)
-    val numBytes = torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
+    val peers = getPeers(String(infoSHA1, charset), String(peerId, charset), torrent["announce"]!!.string)
+    val singleFileMode = torrent["info"]!!.map["files"] == null
+    val folderName = if (singleFileMode) null else torrent["info"]!!.map["name"]!!.string
+    val piecesSha1 = torrent["info"]!!.map["pieces"]!!.bytes
+    val files = if (singleFileMode) {
+        val fileName = torrent["info"]!!.map["name"]!!.string
+        val fileLength = torrent["info"]!!.map["length"]!!.long
+        listOf(TorrentFile(fileLength, listOf(fileName)))
+    } else {
+        torrent["info"]!!.map["files"]!!.list.map { f ->
+            TorrentFile(
+                f.map["length"]!!.long,
+                f.map["path"]!!.list.map { it.string })
+        }
+    }
+    val numBytes = if (singleFileMode) {
+        torrent["info"]!!.map["length"]!!.long
+    } else {
+        torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
+    }
     val diff = numPieces * pieceLength - numBytes
-    return TorrentData(torrent, peers, sha1, peerId, numPieces, pieceLength, pieceLength - diff)
+    return TorrentData(
+        pieceLength,
+        pieceLength - diff,
+        numPieces,
+        private,
+        folderName,
+        files,
+        peers,
+        infoSHA1,
+        peerId,
+        piecesSha1
+    )
 }

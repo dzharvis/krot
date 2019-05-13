@@ -21,7 +21,7 @@ object Disk {
             val byteOffset = i * torrentData.pieceLength
             val byteLength =
                 if (i == torrentData.numPieces - 1) torrentData.lastPieceLength else torrentData.pieceLength
-            val expectedSha1 = torrentData.torrent["info"]!!.map["pieces"]!!.bytes.copyOfRange(i * 20, i * 20 + 20)
+            val expectedSha1 = torrentData.piecesSha1.copyOfRange(i * 20, i * 20 + 20)
             val filePieceSha1 = getFilePieceSha1(i, torrentData, byteOffset, byteLength, folder)
 
             if (Arrays.equals(expectedSha1, filePieceSha1)) {
@@ -46,14 +46,14 @@ object Disk {
         byteLength: Long,
         folder: String
     ): ByteArray {
-        val files = torrentData.torrent["info"]!!.map["files"]!!.list
+        val files = torrentData.files
         var fileOffset = 0L
         var pieceBytes = ByteArray(0)
         for (f in files) {
-            // TODO Use proper file path construction to be windows friendly
-            val filePath = f.map["path"]!!.list.map { it.string }.joinToString("/")
-            val fileLength = f.map["length"]!!.long
-            val file = File(File(folder), filePath)
+            val rootFolder = File(folder)
+            val torrentFolder = torrentData.folder?.let { File(rootFolder, it) } ?: rootFolder
+            val file = File(torrentFolder, f.path.joinToString(File.separator))
+            val fileLength = f.length
             if (!file.exists()) {
                 fileOffset += fileLength
                 continue
@@ -115,8 +115,9 @@ object Disk {
             val fileOperations = prepare(piece, torrent).groupBy { it.file }
             withContext(Dispatchers.IO) {
                 for ((path, fileOperations) in fileOperations) {
-                    val parent = File(folder)
-                    val f = File(parent, path.joinToString("/"))
+                    val rootFolder = File(folder)
+                    val torrentFolder = torrent.folder?.let { File(rootFolder, it) } ?: rootFolder
+                    val f = File(torrentFolder, path.joinToString(File.separator))
                     val raf = openRandomAccessFile(f)
                     for ((_, offset, data) in fileOperations) {
                         raf.seek(offset)
@@ -146,27 +147,24 @@ object Disk {
 
     // TODO Simplify, make readable
     private fun prepare(piece: Piece, torrentData: TorrentData): List<FileOperation> {
-        val torrent = torrentData.torrent
         val pieceLength = torrentData.pieceLength
         val pieceByteOffset = piece.id * pieceLength
         val pieceByteLength = piece.bytes.size
         var fileOffset = 0L
-        return torrent["info"]!!.map["files"]!!.list.mapNotNull { file ->
-            val filePath = file.map["path"]!!.list.map { it.string }
+        return torrentData.files.mapNotNull { file ->
             val fileByteOffset = fileOffset
-            val fileLength = file.map["length"]!!.long
-            fileOffset += fileLength
+            fileOffset += file.length
 
             val intersection = intersection(
                 fileByteOffset,
-                fileByteOffset + fileLength,
+                fileByteOffset + file.length,
                 pieceByteOffset.toLong(),
                 pieceByteOffset + pieceByteLength.toLong()
             )
 
             if (intersection.intersects) {
                 FileOperation(
-                    filePath,
+                    file.path,
                     intersection.x - fileByteOffset,
                     piece.bytes.copyOfRange(
                         (intersection.x - pieceByteOffset).toInt(),
