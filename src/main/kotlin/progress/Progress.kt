@@ -72,7 +72,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
 
     fun printProgress() {
         System.out.print("\r")
-        val peersStr = if (state.equals("Downloading")) "from ${numPeers} numPeers" else ""
+        val peersStr = if (state.equals("Downloading")) "from ${numPeers} peers" else ""
         System.out.print("$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}")
         System.out.flush()
     }
