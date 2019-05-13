@@ -1,7 +1,6 @@
 package tracker
 
 import be.adaxisoft.bencode.BDecoder
-import be.adaxisoft.bencode.BEncodedValue
 import be.adaxisoft.bencode.BEncoder
 import utils.sha1
 import java.io.ByteArrayOutputStream
@@ -10,53 +9,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.Charset
-
-fun generatePeerId(): ByteArray {
-    return sha1("123".toByteArray()) // TODO generate normal peer id
-}
-
-fun infoDictSHA1(info: Any): ByteArray {
-    val out = ByteArrayOutputStream()
-    BEncoder.encode(info, out)
-    return sha1(out.toByteArray())
-}
-
-fun parsePeers(peers: ByteArray): List<PeerAddr> {
-    return (0 until peers.size step 6).map { i ->
-        val ip1 = (peers[i] + 0) and 0xff // + 0 for int casting. I don't like .toInt()
-        val ip2 = (peers[i + 1] + 0) and 0xff
-        val ip3 = (peers[i + 2] + 0) and 0xff
-        val ip4 = (peers[i + 3] + 0) and 0xff
-        val ip = "$ip1.$ip2.$ip3.$ip4"
-        val port = (((peers[i + 4] + 0) and 0xff) shl 8) or ((peers[i + 5] + 0) and 0xff)
-        PeerAddr(ip, port)
-    }
-}
-
-private fun getPeers(infoHash: String, peerIdHash: String, url: String): List<PeerAddr> {
-    val params = mapOf(
-        "info_hash" to infoHash,
-        "uploaded" to "0",
-        "downloaded" to "0",
-        "port" to "10000",
-        "compact" to "1",
-        "numwant" to "100",
-        "peer_id" to peerIdHash,
-        "left" to "10001"
-    )
-        .map { (k, v) -> "$k=${URLEncoder.encode(v, "Windows-1251")}" }
-        .joinToString(separator = "&")
-
-    val query = URL("$url&$params")
-    val conn = query.openConnection() as HttpURLConnection
-    try {
-        conn.requestMethod = "GET"
-        val response = BDecoder(conn.inputStream.buffered()).decodeMap().map
-        return parsePeers(response["peers"]!!.bytes)
-    } finally {
-        conn.disconnect()
-    }
-}
 
 data class AnnounceResp(
     val failure: String?,
@@ -70,7 +22,6 @@ data class AnnounceResp(
 
 data class PeerAddr(val host: String, val port: Int)
 data class TorrentFile(val length: Long, val path: List<String>)
-//data class Info(val piecesSha1: ByteArray, val pieceLength: Long, val files: List<TorrentFile>)
 
 data class TorrentData(
     val pieceLength: Long,
@@ -81,52 +32,108 @@ data class TorrentData(
     val folder: String?,
     val files: List<TorrentFile>,
 
-    val peers: List<PeerAddr>,
     val infoSHA1: ByteArray,
     val peerId: ByteArray,
-
     val piecesSha1: ByteArray
 )
 
-fun processFile(file: String): TorrentData {
-    val charset = Charset.forName("Windows-1251")
-    val torrent = BDecoder(File(file).inputStream()).decodeMap().map
-    val infoSHA1 = infoDictSHA1(torrent["info"]!!)
-    val peerId = generatePeerId()
-    val private = torrent["info"]!!.map["private"]?.int == 1
-    val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
-    val pieceLength = torrent["info"]!!.map["piece length"]!!.long
-    val peers = getPeers(String(infoSHA1, charset), String(peerId, charset), torrent["announce"]!!.string)
-    val singleFileMode = torrent["info"]!!.map["files"] == null
-    val folderName = if (singleFileMode) null else torrent["info"]!!.map["name"]!!.string
-    val piecesSha1 = torrent["info"]!!.map["pieces"]!!.bytes
-    val files = if (singleFileMode) {
-        val fileName = torrent["info"]!!.map["name"]!!.string
-        val fileLength = torrent["info"]!!.map["length"]!!.long
-        listOf(TorrentFile(fileLength, listOf(fileName)))
-    } else {
-        torrent["info"]!!.map["files"]!!.list.map { f ->
-            TorrentFile(
-                f.map["length"]!!.long,
-                f.map["path"]!!.list.map { it.string })
+private fun generatePeerId(): ByteArray {
+    return sha1("123".toByteArray()) // TODO generate normal peer id
+}
+
+private fun infoDictSHA1(info: Any): ByteArray {
+    val out = ByteArrayOutputStream()
+    BEncoder.encode(info, out)
+    return sha1(out.toByteArray())
+}
+
+private fun parsePeers(peers: ByteArray): List<PeerAddr> {
+    return (0 until peers.size step 6).map { i ->
+        val ip1 = (peers[i] + 0) and 0xff // + 0 for int casting. I don't like .toInt()
+        val ip2 = (peers[i + 1] + 0) and 0xff
+        val ip3 = (peers[i + 2] + 0) and 0xff
+        val ip4 = (peers[i + 3] + 0) and 0xff
+        val ip = "$ip1.$ip2.$ip3.$ip4"
+        val port = (((peers[i + 4] + 0) and 0xff) shl 8) or ((peers[i + 5] + 0) and 0xff)
+        PeerAddr(ip, port)
+    }
+}
+
+class Tracker private constructor(
+    val torrentData: TorrentData,
+    val infoHash: String,
+    val peerId: String,
+    val announceUrl: String
+) {
+    companion object {
+        fun fromFile(file: String): Tracker {
+            val torrent = BDecoder(File(file).inputStream()).decodeMap().map
+            val infoSHA1 = infoDictSHA1(torrent["info"]!!)
+            val peerId = generatePeerId()
+            val private = torrent["info"]!!.map["private"]?.int == 1
+            val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
+            val pieceLength = torrent["info"]!!.map["piece length"]!!.long
+            val singleFileMode = torrent["info"]!!.map["files"] == null
+            val folderName = if (singleFileMode) null else torrent["info"]!!.map["name"]!!.string
+            val piecesSha1 = torrent["info"]!!.map["pieces"]!!.bytes
+            val files = if (singleFileMode) {
+                val fileName = torrent["info"]!!.map["name"]!!.string
+                val fileLength = torrent["info"]!!.map["length"]!!.long
+                listOf(TorrentFile(fileLength, listOf(fileName)))
+            } else {
+                torrent["info"]!!.map["files"]!!.list.map { f ->
+                    TorrentFile(
+                        f.map["length"]!!.long,
+                        f.map["path"]!!.list.map { it.string })
+                }
+            }
+            val numBytes = if (singleFileMode) {
+                torrent["info"]!!.map["length"]!!.long
+            } else {
+                torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
+            }
+            val diff = numPieces * pieceLength - numBytes
+            val charset = Charset.forName("Windows-1251")
+            val torrentData = TorrentData(
+                pieceLength,
+                pieceLength - diff,
+                numPieces,
+                private,
+                folderName,
+                files,
+                infoSHA1,
+                peerId,
+                piecesSha1
+            )
+            return Tracker(
+                torrentData,
+                String(infoSHA1, charset),
+                String(peerId, charset),
+                torrent["announce"]!!.string
+            )
         }
     }
-    val numBytes = if (singleFileMode) {
-        torrent["info"]!!.map["length"]!!.long
-    } else {
-        torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
+
+    fun requestPeers(): List<PeerAddr> {
+        val params = listOf(
+            "info_hash" to infoHash,
+            "uploaded" to "0",
+            "downloaded" to "0",
+            "port" to "10000",
+            "compact" to "1",
+            "numwant" to "100",
+            "peer_id" to peerId,
+            "left" to "10001"
+        ).joinToString(separator = "&") { (k, v) -> "$k=${URLEncoder.encode(v, "Windows-1251")}" }
+
+        val query = URL("$announceUrl&$params")
+        val conn = query.openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "GET"
+            val response = BDecoder(conn.inputStream.buffered()).decodeMap().map
+            return parsePeers(response["peers"]!!.bytes)
+        } finally {
+            conn.disconnect()
+        }
     }
-    val diff = numPieces * pieceLength - numBytes
-    return TorrentData(
-        pieceLength,
-        pieceLength - diff,
-        numPieces,
-        private,
-        folderName,
-        files,
-        peers,
-        infoSHA1,
-        peerId,
-        piecesSha1
-    )
 }

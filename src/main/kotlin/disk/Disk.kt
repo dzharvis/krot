@@ -2,9 +2,11 @@ package disk
 
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
-import main.Piece
+import krot.Piece
 import main.progress.Progress
 import tracker.TorrentData
+import utils.getPieceSha1
+import utils.intersection
 import utils.sha1
 import java.io.File
 import java.io.RandomAccessFile
@@ -13,16 +15,18 @@ import kotlin.collections.ArrayList
 
 data class FileOperation(val file: List<String>, val offset: Long, val data: ByteArray)
 
-object Disk {
+class Disk(private val rootFolder: File, private val torrentData: TorrentData) {
+    val input = Channel<Piece>(50)
     private val filesCache = mutableMapOf<String, RandomAccessFile>()
+    private var writerJob: Job? = null
 
-    fun checkDownloadedPieces(torrentData: TorrentData, folder: String, progress: Progress): List<Int> {
+    fun checkDownloadedPieces(progress: Progress): Set<Int> {
         val presentPieces = List(torrentData.numPieces) { i ->
             val byteOffset = i * torrentData.pieceLength
             val byteLength =
                 if (i == torrentData.numPieces - 1) torrentData.lastPieceLength else torrentData.pieceLength
-            val expectedSha1 = torrentData.piecesSha1.copyOfRange(i * 20, i * 20 + 20)
-            val filePieceSha1 = getFilePieceSha1(i, torrentData, byteOffset, byteLength, folder)
+            val expectedSha1 = torrentData.getPieceSha1(i)
+            val filePieceSha1 = getFilePieceSha1(byteOffset, byteLength)
 
             if (Arrays.equals(expectedSha1, filePieceSha1)) {
                 progress.setDone(i)
@@ -33,26 +37,19 @@ object Disk {
             }
         }.filterNotNull()
 
-        close()
-        filesCache.clear()
-
-        return presentPieces
+        closeFiles()
+        return presentPieces.toSet()
     }
 
     private fun getFilePieceSha1(
-        pieceId: Int,
-        torrentData: TorrentData,
         byteOffset: Long,
-        byteLength: Long,
-        folder: String
+        byteLength: Long
     ): ByteArray {
         val files = torrentData.files
         var fileOffset = 0L
         var pieceBytes = ByteArray(0)
         for (f in files) {
-            val rootFolder = File(folder)
-            val torrentFolder = torrentData.folder?.let { File(rootFolder, it) } ?: rootFolder
-            val file = File(torrentFolder, f.path.joinToString(File.separator))
+            val file = File(rootFolder, f.path.joinToString(File.separator))
             val fileLength = f.length
             if (!file.exists()) {
                 fileOffset += fileLength
@@ -71,8 +68,6 @@ object Disk {
                 continue
             }
 
-//            println("intersection found $pieceId ${intersection.x} ${intersection.y} ${file.absolutePath}")
-
             val raf = openRandomAccessFile(file)
             val fileBytes = ByteArray((intersection.y - intersection.x).toInt())
             raf.seek(intersection.x - fileOffset)
@@ -89,36 +84,30 @@ object Disk {
         return sha1(pieceBytes)
     }
 
-    fun initWriter(input: Channel<Piece>, torrent: TorrentData, folder: String): Job {
-        val pieceLength = torrent.pieceLength
+    fun initWriter() {
+        val pieceLength = torrentData.pieceLength
         val pieceBufferSize = 100 * 1024 * 1024 // 100MB
         val bufferLength = pieceBufferSize / pieceLength
-        return GlobalScope.launch {
+        writerJob = GlobalScope.launch {
             val pieceBuffer = ArrayList<Piece>()
             for (piece in input) {
                 pieceBuffer.add(piece)
-                if (pieceBuffer.size > bufferLength) {
-                    writeToDisk(pieceBuffer, torrent, folder)
+                if (pieceBuffer.size >= bufferLength) {
+                    writeToDisk(pieceBuffer)
                     pieceBuffer.clear()
                 }
             }
-            writeToDisk(pieceBuffer, torrent, folder)
+            writeToDisk(pieceBuffer)
+            closeFiles()
         }
     }
 
-    private suspend fun writeToDisk(
-        pieces: List<Piece>,
-        torrent: TorrentData,
-        folder: String
-    ) {
+    private suspend fun writeToDisk(pieces: List<Piece>) {
         for (piece in pieces.sortedBy { it.id }) {
-            val fileOperations = prepare(piece, torrent).groupBy { it.file }
+            val fileOperations = prepare(piece).groupBy { it.file }
             withContext(Dispatchers.IO) {
                 for ((path, fileOperations) in fileOperations) {
-                    val rootFolder = File(folder)
-                    val torrentFolder = torrent.folder?.let { File(rootFolder, it) } ?: rootFolder
-                    val f = File(torrentFolder, path.joinToString(File.separator))
-                    val raf = openRandomAccessFile(f)
+                    val raf = openRandomAccessFile(File(rootFolder, path.joinToString(File.separator)))
                     for ((_, offset, data) in fileOperations) {
                         raf.seek(offset)
                         raf.write(data)
@@ -139,14 +128,26 @@ object Disk {
         }
     }
 
-    fun close() {
+    suspend fun shutdown() {
+        input.close()
+        writerJob?.join()
+        withContext(Dispatchers.IO + NonCancellable) {
+            for ((_, f) in filesCache) {
+                f.close()
+            }
+        }
+        filesCache.clear()
+    }
+
+    private fun closeFiles() {
         for ((_, f) in filesCache) {
             f.close()
         }
+        filesCache.clear()
     }
 
     // TODO Simplify, make readable
-    private fun prepare(piece: Piece, torrentData: TorrentData): List<FileOperation> {
+    private fun prepare(piece: Piece): List<FileOperation> {
         val pieceLength = torrentData.pieceLength
         val pieceByteOffset = piece.id * pieceLength
         val pieceByteLength = piece.bytes.size
@@ -158,8 +159,8 @@ object Disk {
             val intersection = intersection(
                 fileByteOffset,
                 fileByteOffset + file.length,
-                pieceByteOffset.toLong(),
-                pieceByteOffset + pieceByteLength.toLong()
+                pieceByteOffset,
+                pieceByteOffset + pieceByteLength
             )
 
             if (intersection.intersects) {
@@ -174,17 +175,6 @@ object Disk {
             } else {
                 null
             }
-        }
-    }
-
-    data class Intersection(val intersects: Boolean, val x: Long, val y: Long)
-
-    private fun intersection(x1: Long, y1: Long, x2: Long, y2: Long): Intersection {
-        val intersects = Math.min(y1, y2) - Math.max(x1, x2)
-        return if (intersects > 0) {
-            Intersection(true, Math.max(x1, x2), Math.min(y1, y2))
-        } else {
-            Intersection(false, -1, -1)
         }
     }
 }

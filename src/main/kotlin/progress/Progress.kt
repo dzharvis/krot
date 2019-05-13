@@ -32,17 +32,13 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
 
     fun setInProgress(id: Int) {
         progress[id] = InProgress
-        recalcBandwidth()
         printProgress()
     }
 
     private fun recalcBandwidth() {
         val currentTime = System.currentTimeMillis()
         bandwidthWindow.add(currentTime)
-        while (bandwidthWindow.size > 5000) {
-            bandwidthWindow.removeAt(0)
-        }
-        bandwidthWindow.removeIf { it < currentTime - 5000 }
+        bandwidthWindow.removeIf { it < currentTime - 5000 } // last 5 sec window
     }
 
     fun getProgressString(): String {

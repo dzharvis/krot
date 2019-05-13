@@ -3,13 +3,13 @@ package protocol
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.selects.select
-import main.Closed
-import main.DownloadRequest
-import main.SupervisorMsg
-import main.Ticker
-import main.HasPiece
-import main.Piece
-import main.DownloadCanceledRequest
+import krot.Closed
+import krot.DownloadRequest
+import krot.SupervisorMsg
+import krot.Ticker
+import krot.HasPiece
+import krot.Piece
+import krot.DownloadCanceledRequest
 import java.io.IOException
 import java.io.InvalidObjectException
 import java.lang.Exception
@@ -69,6 +69,7 @@ class PeerConnection(
                                     output.send(DownloadCanceledRequest(message.id))
                                     throw ex
                                 }
+                                ticker.poll() // remove pending keep-alive just in case
                                 output.send(piece)
                             }
                             is Ticker -> protocol.writeMessage(KeepAlive)
@@ -148,12 +149,12 @@ class PeerConnection(
                     val currentByte = (payload.bitField[i] + 0) and 0xff
                     for (j in 0 until 8) {
                         val has = ((currentByte ushr (7 - j)) and 1) == 1
-                        if (has) output.send(HasPiece(i * 8 + j, has, this))
+                        if (has) output.send(HasPiece(i * 8 + j, this))
                     }
                 }
             }
             is Have -> { // has parts single piece
-                output.send(HasPiece(payload.pieceIndex, true, this))
+                output.send(HasPiece(payload.pieceIndex, this))
             }
             is Choke -> choked = true
             is Unchoke -> choked = false
