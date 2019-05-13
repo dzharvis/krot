@@ -44,7 +44,15 @@ fun main(args: Array<String>) {
     val dstFolder = args[1]
 
     val torrentData = processFile(file)
-    val (_, peers, sha1, peerId, numPieces, pieceLength, lastPieceLength) = torrentData
+    val (pieceLength,
+        lastPieceLength,
+        numPieces,
+        _,
+        _,
+        _,
+        peers,
+        infoSHA1,
+        peerId) = torrentData
     val progress = Progress(numPieces, pieceLength)
     progress.printProgress()
     val input = Channel<SupervisorMsg>(100) // small buffer just in case
@@ -62,12 +70,9 @@ fun main(args: Array<String>) {
 
     Runtime.getRuntime().addShutdownHook(Thread() {
         println("\nShutting down...")
-        try {
-            diskChannel.close()
-            runBlocking { diskJob.join() }
-            Disk.close()
-        } catch (ex: Exception) {
-        }
+        diskChannel.close()
+        runBlocking { diskJob.join() }
+        Disk.close()
     })
 
     val activePeers = ConcurrentHashMap.newKeySet<PeerConnection>()
@@ -76,7 +81,7 @@ fun main(args: Array<String>) {
     val peerJobs = peers.map { (ip, port) ->
         val peer = PeerConnection(InetSocketAddress(ip, port), input)
         GlobalScope.launch {
-            peer.start(sha1, peerId)
+            peer.start(infoSHA1, peerId)
         }
         activePeers.add(peer)
         peer
@@ -93,7 +98,7 @@ fun main(args: Array<String>) {
 
             newPeers.forEach { p ->
                 GlobalScope.launch {
-                    p.start(sha1, peerId)
+                    p.start(infoSHA1, peerId)
                 }
                 activePeers.add(p)
             }
@@ -168,7 +173,7 @@ fun main(args: Array<String>) {
                     downloadsInProgress--
                     val hashEqual = computePieceHash(message, torrentData)
                     if (!hashEqual) {
-                        piecesToPeers[message.id]!!.inProgress = false
+                        piecesToPeers[message.id]?.inProgress = false
                         progress.setEmpty(message.id)
                     } else {
                         piecesToPeers.remove(message.id)
@@ -195,7 +200,7 @@ fun main(args: Array<String>) {
 
 fun computePieceHash(message: Piece, torrentData: TorrentData): Boolean {
     val expectedHash =
-        torrentData.torrent["info"]!!.map["pieces"]!!.bytes.copyOfRange(message.id * 20, message.id * 20 + 20)
+        torrentData.piecesSha1.copyOfRange(message.id * 20, message.id * 20 + 20)
     val pieceHash = sha1(message.bytes)
     return Arrays.equals(expectedHash, pieceHash)
 }
@@ -207,12 +212,13 @@ fun initiateDownloadIfNecessary(
     downloadsInProgress: Int
 ): List<Int> {
     val amount = maxSimultaneousDownloads - downloadsInProgress
+    val ignoreDuplicates = piecesToPeers.size <= 20 // boost speed at the end
     return if (amount == 0) emptyList()
     else
         piecesToPeers
             .map { (_, piece) -> piece }
             .filter { piece ->
-                !piece.inProgress && piece.peers.isNotEmpty()
+                (ignoreDuplicates || !piece.inProgress) && piece.peers.isNotEmpty()
             }
             .sortedBy { it.peers.size } // rarest first
             .take(amount)
