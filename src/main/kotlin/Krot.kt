@@ -94,7 +94,6 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                         for (d in downloads) {
                             progress.setInProgress(d)
                         }
-
                     }
                     is Ticker -> {
                         val downloads = initiateDownloadIfNecessary(piecesToPeers, downloadsInProgress)
@@ -134,6 +133,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                     }
                     else -> error(message)
                 }
+                progress.downloadsInProgress = downloadsInProgress
             }
         }
     }
