@@ -1,3 +1,5 @@
+![Usage example](pics/mole.png)
+
 # Command Line Torrent Client
 Command line torrent client written in kotlin using coroutines.
 
