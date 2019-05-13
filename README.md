@@ -2,7 +2,7 @@
 Command line torrent client written in kotlin using coroutines.
 
 ## Usage
-`java -jar -Dkotlinx.coroutines.debug=off krot-1.0-SNAPSHOT.jar ~/Downloads/got.torrent /tmp/got/`
+`java -jar  krot.jar ~/Downloads/lego.torrent /tmp/lego/`
 
 First argument is torrent file, second - destination folder.
 
