@@ -113,8 +113,10 @@ class PeerConnection(
         id: Int,
         pieceLength: Int,
         peerMessages: ReceiveChannel<Message>,
-        protocol: Protocol
+        protocol: Protocol,
+        retryCount: Int = 5
     ): Piece {
+        if (retryCount == 0) error("Maximum retry count reached")
         if (choked) {
             protocol.writeMessage(Interested) // i don't know if i should send interested again after choking
             log("Interested byte sent")
@@ -135,12 +137,12 @@ class PeerConnection(
                 is Unchoke -> {
                     log("Unchoke received here. Retry")
                     choked = false
-                    return downloadPiece(id, pieceLength, peerMessages, protocol)
+                    return downloadPiece(id, pieceLength, peerMessages, protocol, retryCount - 1)
                 }
                 is Choke -> {
                     choked = true
                     // TODO limit number of retries
-                    return downloadPiece(id, pieceLength, peerMessages, protocol) // stupid retry
+                    return downloadPiece(id, pieceLength, peerMessages, protocol, retryCount - 1) // stupid retry
                 }
                 else -> throw InvalidObjectException("Chunk expected, $response received")
             }
@@ -172,7 +174,6 @@ class PeerConnection(
             else -> log("Cannot process message $payload")
         }
     }
-
 
 
     override fun equals(other: Any?): Boolean {
