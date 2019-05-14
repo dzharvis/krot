@@ -16,6 +16,8 @@ import java.lang.Exception
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.AsynchronousSocketChannel
+import java.util.logging.Level
+import java.util.logging.Logger
 
 class PeerConnection(
     val addr: InetSocketAddress,
@@ -27,7 +29,7 @@ class PeerConnection(
     val input = Channel<SupervisorMsg>() // for external events. Should be called only with offer
 
     private fun log(msg: String) {
-//        println("[$addr] $msg")
+        utils.log("[$addr] $msg")
     }
 
     suspend fun start(sha1: ByteArray, peerId: ByteArray) {
@@ -125,13 +127,15 @@ class PeerConnection(
         val pieceBytes = ByteBuffer.allocate(pieceLength + defaultChunkSize)
         for (i in 0 until pieceLength step defaultChunkSize) {
             val chunkSize = if (i + defaultChunkSize > pieceLength) (pieceLength - i) else defaultChunkSize
-            log("chunk size selected: $chunkSize")
-            log("requesting piece [$pieceLength, $id] $i, $defaultChunkSize")
             protocol.writeMessage(Request(id, i, chunkSize))
             when (val response = peerMessages.receive()) {
                 is Chunk -> {
-                    log("Chunk received! ${response.begin} ${response.block.size}")
                     pieceBytes.put(response.block)
+                }
+                is Unchoke -> {
+                    log("Unchoke received here. Retry")
+                    choked = false
+                    return downloadPiece(id, pieceLength, peerMessages, protocol)
                 }
                 is Choke -> {
                     choked = true
@@ -164,9 +168,12 @@ class PeerConnection(
             }
             is Choke -> choked = true
             is Unchoke -> choked = false
+            is KeepAlive -> log("keep-alive received")
             else -> log("Cannot process message $payload")
         }
     }
+
+
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -181,6 +188,10 @@ class PeerConnection(
 
     override fun hashCode(): Int {
         return addr.hashCode()
+    }
+
+    override fun toString(): String {
+        return "PC[$addr, $choked]"
     }
 
 }

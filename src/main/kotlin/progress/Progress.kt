@@ -1,5 +1,7 @@
 package main.progress
 
+import utils.progress
+
 sealed class ProgressState
 object InProgress: ProgressState()
 object Done: ProgressState()
@@ -72,10 +74,9 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
     }
 
     fun printProgress() {
-        System.out.print("\r")
         val peersStr = if (state.equals("Downloading")) "from $downloadsInProgress($numPeers) peers" else ""
-        System.out.print("$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}")
-        System.out.flush()
+        val progressStr = "$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}"
+        progress("\r$progressStr")
     }
 
     override fun toString(): String {

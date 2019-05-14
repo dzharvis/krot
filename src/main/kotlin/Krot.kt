@@ -11,6 +11,7 @@ import main.progress.Progress
 import protocol.PeerConnection
 import tracker.Tracker
 import utils.getPieceSha1
+import utils.log
 import utils.sha1
 import java.net.InetSocketAddress
 import java.util.*
@@ -36,7 +37,7 @@ data class PieceInfo(
 class Krot(val disk: Disk, val tracker: Tracker) {
 
     private val input = Channel<SupervisorMsg>(100) // small buffer just in case
-    private val maxSimultaneousDownloads = 40
+    private val maxSimultaneousDownloads = 100
 
     fun start() {
         val (pieceLength, _, numPieces) = tracker.torrentData
@@ -90,6 +91,8 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                     is HasPiece -> {
                         piecesToPeers[message.id]?.peers?.add(message.peer)
                         val downloads = initiateDownloadIfNecessary(piecesToPeers, downloadsInProgress)
+                        if (downloads.isNotEmpty())
+                            log("[HasPiece]$downloads, ${downloads.size} downloads has started")
                         downloadsInProgress += downloads.size
                         for (d in downloads) {
                             progress.setInProgress(d)
@@ -97,10 +100,13 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                     }
                     is Ticker -> {
                         val downloads = initiateDownloadIfNecessary(piecesToPeers, downloadsInProgress)
+                        log("[Ticker] $downloads, ${downloads.size} downloads has started")
                         downloadsInProgress += downloads.size
                         for (d in downloads) {
                             progress.setInProgress(d)
                         }
+                        log("[Ticker] active peers -> ${activePeers.size} $activePeers")
+                        log("[Ticker] inflight downloads -> $downloadsInProgress")
                     }
                     is Closed -> {
                         for ((_, v) in piecesToPeers) {
@@ -108,16 +114,24 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                         }
                         activePeers.remove(message.peer)
                         progress.numPeers = activePeers.size
+                        log("[Closed] ${message.peer.addr} died")
+                        log("[Closed] active peers -> ${activePeers.size} $activePeers")
+                        log("[Closed] inflight downloads -> $downloadsInProgress")
                     }
                     is DownloadCanceledRequest -> {
                         downloadsInProgress--
                         piecesToPeers[message.id]?.inProgress = false
+                        log("[DownloadCanceledRequest] ${message.id}")
+                        log("[DownloadCanceledRequest] active peers -> ${activePeers.size} $activePeers")
+                        log("[DownloadCanceledRequest] inflight downloads -> $downloadsInProgress")
                     }
                     is Piece -> {
+                        log("[Piece] ${message.id} arrived")
                         progress.numPeers = activePeers.size
                         downloadsInProgress--
                         val hashEqual = isPieceValid(message)
                         if (!hashEqual) {
+                            log("[Piece] ${message.id} hash check failed")
                             piecesToPeers[message.id]?.inProgress = false
                             progress.setEmpty(message.id)
                         } else {
@@ -130,10 +144,14 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                                 return@launch
                             }
                         }
+                        val ptp = piecesToPeers.values.flatMap { it.peers }.toSet()
+                        log("[Piece] ptp ${ptp.size} / ap ${activePeers.size}")
+                        log("[Piece] inflight downloads -> $downloadsInProgress")
                     }
                     else -> error(message)
                 }
                 progress.downloadsInProgress = downloadsInProgress
+                progress.printProgress()
             }
         }
     }
@@ -190,6 +208,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                         false
                     }
                     if (offer) {
+                        log("[Krot] Peer $peer started downloading process")
                         piece.inProgress = true
                         piece.id
                     } else
