@@ -73,9 +73,20 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
         return "$bps KB/sec"
     }
 
+    var maxProgressLen = 0
+
     fun printProgress() {
         val peersStr = if (state.equals("Downloading")) "from $downloadsInProgress($numPeers) peers" else ""
-        val progressStr = "$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}"
+        var progressStr = "$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}"
+        // pad with spaces in order to clear old values
+        progressStr = if (progressStr.length < maxProgressLen) {
+            val diff = maxProgressLen - progressStr.length
+            val spaces = (0 until diff).joinToString("") {" "}
+            "$progressStr$spaces"
+        } else {
+            maxProgressLen = progressStr.length
+            progressStr
+        }
         progress("\r$progressStr")
     }
 
