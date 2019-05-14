@@ -66,13 +66,19 @@ class PeerConnection(
                                 val piece = try {
                                     downloadPiece(message.id, message.pieceLength, peerMessages, protocol)
                                 } catch (ex: Exception) {
-                                    output.send(DownloadCanceledRequest(message.id))
+                                    log("Piece Download was interrupted! ${message.id}")
+                                    withContext(NonCancellable) {
+                                        output.send(DownloadCanceledRequest(message.id))
+                                    }
                                     throw ex
                                 }
                                 ticker.poll() // remove pending keep-alive just in case
                                 output.send(piece)
                             }
-                            is Ticker -> protocol.writeMessage(KeepAlive)
+                            is Ticker -> {
+                                log("Sending keep-alive")
+                                protocol.writeMessage(KeepAlive)
+                            }
                         }
                     }
                 }
