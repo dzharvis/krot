@@ -114,8 +114,10 @@ class Tracker private constructor(
         }
     }
 
+    var trackerId: String? = null
+
     fun requestPeers(): List<PeerAddr> {
-        val params = listOf(
+        val paramsList = mutableListOf(
             "info_hash" to infoHash,
             "uploaded" to "0",
             "downloaded" to "0",
@@ -124,13 +126,19 @@ class Tracker private constructor(
             "numwant" to "100",
             "peer_id" to peerId,
             "left" to "10001"
-        ).joinToString(separator = "&") { (k, v) -> "$k=${URLEncoder.encode(v, "Windows-1251")}" }
+        )
+        if (trackerId != null) {
+            paramsList.add("trackerid" to trackerId!!)
+        }
+
+        val params = paramsList.joinToString(separator = "&") { (k, v) -> "$k=${URLEncoder.encode(v, "Windows-1251")}" }
 
         val query = URL("$announceUrl&$params")
         val conn = query.openConnection() as HttpURLConnection
         try {
             conn.requestMethod = "GET"
             val response = BDecoder(conn.inputStream.buffered()).decodeMap().map
+            if (trackerId == null) trackerId = response["tracker id"]?.string
             return parsePeers(response["peers"]!!.bytes)
         } finally {
             conn.disconnect()
