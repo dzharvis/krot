@@ -82,7 +82,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
 
             disk.initWriter()
             progress.state = "Downloading"
-            val ticker = ticker(delayMillis = 1000, initialDelayMillis = 0, mode = TickerMode.FIXED_DELAY)
+            val ticker = ticker(delayMillis = 5000, initialDelayMillis = 0, mode = TickerMode.FIXED_DELAY)
             while (true) {
                 when (val message = select<SupervisorMsg> {
                     ticker.onReceive { Ticker }
@@ -90,13 +90,6 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                 }) {
                     is HasPiece -> {
                         piecesToPeers[message.id]?.peers?.add(message.peer)
-                        val downloads = initiateDownloadIfNecessary(piecesToPeers, downloadsInProgress)
-                        if (downloads.isNotEmpty())
-                            log("[HasPiece]$downloads, ${downloads.size} downloads has started")
-                        downloadsInProgress += downloads.size
-                        for (d in downloads) {
-                            progress.setInProgress(d)
-                        }
                     }
                     is Ticker -> {
                         val downloads = initiateDownloadIfNecessary(piecesToPeers, downloadsInProgress)
@@ -135,6 +128,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                             piecesToPeers[message.id]?.inProgress = false
                             progress.setEmpty(message.id)
                         } else {
+                            log("[Piece] ${message.id} hash success")
                             piecesToPeers.remove(message.id)
                             disk.input.send(message)
                             progress.setDone(message.id)

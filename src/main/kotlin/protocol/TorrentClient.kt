@@ -126,13 +126,13 @@ class PeerConnection(
 
         // loop request for chunks
         val defaultChunkSize = Math.min(pieceLength, 16384)
-        val pieceBytes = ByteBuffer.allocate(pieceLength + defaultChunkSize)
+        val pieceBytes = ByteArray(pieceLength)//ByteBuffer.allocate(pieceLength + defaultChunkSize)
         for (i in 0 until pieceLength step defaultChunkSize) {
             val chunkSize = if (i + defaultChunkSize > pieceLength) (pieceLength - i) else defaultChunkSize
             protocol.writeMessage(Request(id, i, chunkSize))
             when (val response = peerMessages.receive()) {
                 is Chunk -> {
-                    pieceBytes.put(response.block)
+                    System.arraycopy(response.block, 0, pieceBytes, i, chunkSize)
                 }
                 is Unchoke -> {
                     log("Unchoke received here. Retry")
@@ -147,11 +147,7 @@ class PeerConnection(
                 else -> throw InvalidObjectException("Chunk expected, $response received")
             }
         }
-        pieceBytes.flip()
-        val data = ByteArray(pieceBytes.limit())
-        log("${data.size} - bytes downloaded")
-        pieceBytes.get(data)
-        return Piece(id, data)
+        return Piece(id, pieceBytes)
     }
 
     private suspend fun processPayload(payload: Message) {

@@ -65,43 +65,45 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
         // read body
         bb.clear()
         val bodyLength = length - 1 // length includes message-id byte
-        val b = if (bodyLength > 0) {
-            tcpClient.read(channel, bb, bodyLength)
-            bb.flip()
-            val b = ByteArray(bb.limit())
-            bb.get(b)
-            b
-        } else {
-            ByteArray(0)
-        }
-        return parse(RawMessage(id, b))
+        tcpClient.read(channel, bb, bodyLength)
+        bb.flip()
+        return parse(id.toInt(), bb)
     }
 
-    private fun parse(m: RawMessage): Message {
-        return when (m.id.toInt()) {
+    private fun parse(id: Int, bb: ByteBuffer): Message {
+        return when (id) {
             // keep-alive skipped (it doesn't has an id)
             0 -> Choke
             1 -> Unchoke
             2 -> Interested
             3 -> NotInterested
             4 -> {
-                val pieceId = ByteBuffer.wrap(m.body).int
+                val pieceId = bb.int
                 Have(pieceId)
             }
             5 -> {
-                Bitfield(m.body)
+                Bitfield(toByteArray(bb))
             }
             7 -> {
-                val index = ByteBuffer.wrap(m.body, 0, 4).int
-                val begin = ByteBuffer.wrap(m.body, 4, 4).int
-                val block = m.body.copyOfRange(8, m.body.size)
+                val index = bb.int
+                val begin = bb.int
+                // TODO get rid of allocations here
+                //  (not sure if it's possible without adding a pool of byte buffers and additional complexity
+                //  probably postpone until rewritten to netty
+                val block = toByteArray(bb)
                 Chunk(index, begin, block)
             }
             else -> {
-                log("Unsupported message id ${m.id}")
+                log("Unsupported message id $id")
                 throw IllegalArgumentException()
             }
         }
+    }
+
+    private fun toByteArray(bb: ByteBuffer): ByteArray {
+        val body = ByteArray(bb.limit() - bb.position())
+        bb.get(body)
+        return body
     }
 
     suspend fun writeMessage(message: Message) {
@@ -109,7 +111,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
             is Choke,
             is Unchoke,
             is Interested,
-            is NotInterested -> with(bb) {
+            is NotInterested -> {
                 bb.clear()
                 bb.putInt(1)
                 bb.put(message.id)
