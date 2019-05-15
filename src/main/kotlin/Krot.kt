@@ -139,8 +139,6 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                                 return@launch
                             }
                         }
-                        val ptp = piecesToPeers.values.flatMap { it.peers }.toSet()
-                        log("[Piece] ptp ${ptp.size} / ap ${activePeers.size}")
                         log("[Piece] inflight downloads -> $downloadsInProgress")
                     }
                     else -> error(message)
