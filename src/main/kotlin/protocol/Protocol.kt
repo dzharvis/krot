@@ -10,8 +10,6 @@ import java.nio.charset.Charset
 import java.util.concurrent.TimeUnit
 
 
-data class RawMessage(val id: Byte, val body: ByteArray)
-
 sealed class Message(val id: Byte)
 object KeepAlive : Message(-1)
 object Choke : Message(0)
@@ -23,6 +21,10 @@ data class Bitfield(val bitField: ByteArray) : Message(5)
 data class Request(val index: Int, val begin: Int, val length: Int) : Message(6)
 data class Chunk(val index: Int, val begin: Int, val block: ByteArray) : Message(7)
 
+enum class Flags {
+    DHT
+}
+
 // Not thread safe
 // Use as thread/coroutine local instance
 class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: AsynchronousSocketChannel) {
@@ -31,17 +33,17 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
     private val bb = ByteBuffer.allocate(bufferSize)
 
     private fun log(msg: String) {
-//        println("[$addr] $msg")
+        utils.log("[$addr] $msg")
     }
 
     // returns only after handshake success
-    suspend fun connect(sha1: ByteArray, peerId: ByteArray) {
+    suspend fun connect(sha1: ByteArray, peerId: ByteArray): Set<Flags> {
         // there is no possibility to provide a timeout to an asyncChannel
         // thus set timeout on a coroutine itself
         withTimeout(2000L) { tcpClient.connect(channel, addr) }
         log("Connected to $addr")
 
-        doHandshake(sha1, peerId)
+        return doHandshake(sha1, peerId)
     }
 
     suspend fun readMessage(): Message {
@@ -152,7 +154,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
     private suspend fun doHandshake(
         sha1: ByteArray,
         peerId: ByteArray
-    ) {
+    ): Set<Flags> {
         bb.put(19)
         bb.put("BitTorrent protocol".toByteArray(Charset.forName("Windows-1251")))
         bb.put(ByteArray(8))
@@ -174,5 +176,14 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
         val b = ByteArray(bb.limit())
         bb.get(b)
         log(String(b, Charset.forName("Windows-1251")))
+        return parseFlags(b.copyOfRange(protocolLength, protocolLength + 8))
+    }
+
+    private fun parseFlags(bytes: ByteArray): Set<Flags> {
+        // may add more flags in the future, but currently i'm only interested in dht flag
+        if ((bytes[7].toInt() and 1) == 1) {
+            return setOf(Flags.DHT)
+        }
+        return emptySet()
     }
 }

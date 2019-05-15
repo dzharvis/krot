@@ -16,8 +16,7 @@ import java.lang.Exception
 import java.net.InetSocketAddress
 import java.nio.ByteBuffer
 import java.nio.channels.AsynchronousSocketChannel
-import java.util.logging.Level
-import java.util.logging.Logger
+import java.util.*
 
 class PeerConnection(
     val addr: InetSocketAddress,
@@ -27,6 +26,7 @@ class PeerConnection(
     @Volatile
     var choked = true
     val input = Channel<SupervisorMsg>() // for external events. Should be called only with offer
+    val protocolExtensions = mutableSetOf<Flags>()
 
     private fun log(msg: String) {
         utils.log("[$addr] $msg")
@@ -36,7 +36,7 @@ class PeerConnection(
         val channel = AsynchronousSocketChannel.open()
         try {
             val protocol = Protocol(addr, 32384, channel)
-            protocol.connect(sha1, peerId)
+            protocolExtensions.addAll(protocol.connect(sha1, peerId))
             coroutineScope {
                 // read peer messages
                 val peerMessages = produce(capacity = 100) {
