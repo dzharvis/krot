@@ -100,6 +100,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                         }
                         log("[Ticker] active peers -> ${activePeers.size} $activePeers")
                         log("[Ticker] inflight downloads -> $downloadsInProgress")
+                        progress.printProgress()
                     }
                     is Closed -> {
                         for ((_, v) in piecesToPeers) {
@@ -145,7 +146,6 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                     else -> error(message)
                 }
                 progress.downloadsInProgress = downloadsInProgress
-                progress.printProgress()
             }
         }
     }

@@ -8,38 +8,23 @@ object Done: ProgressState()
 object Empty: ProgressState()
 
 class Progress(private val numPieces: Int, private val pieceSize: Long) {
-    private val progress: Array<ProgressState> = Array(numPieces) { Empty }
+    private val progress: MutableList<ProgressState> = MutableList(numPieces) { Empty }
     private val bandwidthWindow = mutableListOf<Long>()
     var state = "Init"
-        set(value) {
-            field = value
-            printProgress()
-        }
     var numPeers = 0
-        set(value) {
-            field = value
-            printProgress()
-        }
     var downloadsInProgress = 0
-        set(value) {
-            field = value
-            printProgress()
-        }
 
     fun setDone(id: Int) {
         progress[id] = Done
         recalcBandwidth()
-        printProgress()
     }
 
     fun setEmpty(id: Int) {
         progress[id] = Empty
-        printProgress()
     }
 
     fun setInProgress(id: Int) {
         progress[id] = InProgress
-        printProgress()
     }
 
     private fun recalcBandwidth() {
@@ -48,9 +33,9 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
         bandwidthWindow.removeIf { it < currentTime - 5000 } // last 5 sec window
     }
 
-    fun getProgressString(): String {
+    private fun getProgressString(): String {
         val chunks = numPieces / 50
-        return progress.toList().chunked(chunks).joinToString("", "[", "]") { chunk ->
+        return progress.chunked(chunks).joinToString("", "[", "]") { chunk ->
             when {
                 chunk.all { it == Done } -> "#"
                 chunk.count { it == Done } >= chunks/2 -> "="
@@ -60,13 +45,13 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
         }
     }
 
-    fun getProgressPercent(): String {
+    private fun getProgressPercent(): String {
         val donePieces = progress.filter { it == Done }.size
         val percent = donePieces * 100 / numPieces
         return "$percent%"
     }
 
-    fun getBandwidth(): String {
+    private fun getBandwidth(): String {
         val currentTime = System.currentTimeMillis()
         val bytesReceived = bandwidthWindow.filter { it >= currentTime - 5000 }.fold(0L, { acc, _ -> acc + pieceSize })
         val bps = bytesReceived / 1024 / 5
