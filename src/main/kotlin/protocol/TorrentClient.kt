@@ -14,19 +14,20 @@ import java.io.IOException
 import java.io.InvalidObjectException
 import java.lang.Exception
 import java.net.InetSocketAddress
-import java.nio.ByteBuffer
 import java.nio.channels.AsynchronousSocketChannel
-import java.util.*
 
 class PeerConnection(
     val addr: InetSocketAddress,
     val output: Channel<SupervisorMsg>
 ) {
+    companion object {
+        private const val DEFAULT_BLOCK_SIZE = 16384
+    }
 
     @Volatile
     var choked = true
     val input = Channel<SupervisorMsg>() // for external events. Should be called only with offer
-    val protocolExtensions = mutableSetOf<Flags>()
+    private val protocolExtensions = mutableSetOf<Flags>()
 
     private fun log(msg: String) {
         utils.log("[$addr] $msg")
@@ -125,7 +126,7 @@ class PeerConnection(
         }
 
         // loop request for chunks
-        val defaultChunkSize = Math.min(pieceLength, 16384)
+        val defaultChunkSize = DEFAULT_BLOCK_SIZE.coerceAtMost(pieceLength)
         val pieceBytes = ByteArray(pieceLength)//ByteBuffer.allocate(pieceLength + defaultChunkSize)
         for (i in 0 until pieceLength step defaultChunkSize) {
             val chunkSize = if (i + defaultChunkSize > pieceLength) (pieceLength - i) else defaultChunkSize
@@ -141,7 +142,6 @@ class PeerConnection(
                 }
                 is Choke -> {
                     choked = true
-                    // TODO limit number of retries
                     return downloadPiece(id, pieceLength, peerMessages, protocol, retryCount - 1) // stupid retry
                 }
                 else -> throw InvalidObjectException("Chunk expected, $response received")
