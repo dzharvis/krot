@@ -139,6 +139,9 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                                 return@launch
                             }
                         }
+                        val downloads = initiateDownloadIfNecessary(piecesToPeers, downloadsInProgress)
+                        log("[Piece] $downloads, ${downloads.size} downloads has started")
+                        downloadsInProgress += downloads.size
                         log("[Piece] inflight downloads -> $downloadsInProgress")
                     }
                     else -> error(message)
