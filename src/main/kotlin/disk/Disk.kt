@@ -28,7 +28,7 @@ class Disk(private val rootFolder: File, private val torrentData: TorrentData) {
             val expectedSha1 = torrentData.getPieceSha1(i)
             val filePieceSha1 = getFilePieceSha1(byteOffset, byteLength)
 
-            if (Arrays.equals(expectedSha1, filePieceSha1)) {
+            if (expectedSha1.contentEquals(filePieceSha1)) {
                 progress.setDone(i)
                 progress.printProgress()
                 i
@@ -103,10 +103,9 @@ class Disk(private val rootFolder: File, private val torrentData: TorrentData) {
     }
 
     private suspend fun writeToDisk(pieces: List<Piece>) {
-        for (piece in pieces.sortedBy { it.id }) {
-            val fileOperations = prepare(piece).groupBy { it.file }
-            withContext(Dispatchers.IO) {
-                for ((path, fileOperations) in fileOperations) {
+        withContext(Dispatchers.IO) {
+            for (piece in pieces.sortedBy { it.id }) {
+                for ((path, fileOperations) in prepare(piece).groupBy { it.file }) {
                     val raf = openRandomAccessFile(File(rootFolder, path.joinToString(File.separator)))
                     for ((_, offset, data) in fileOperations) {
                         raf.seek(offset)

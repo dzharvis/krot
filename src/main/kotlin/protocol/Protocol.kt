@@ -74,7 +74,7 @@ class Protocol(val addr: InetSocketAddress, bufferSize: Int, val channel: Asynch
 
     private fun parse(id: Int, bb: ByteBuffer): Message {
         return when (id) {
-            // keep-alive skipped (it doesn't has an id)
+            // keep-alive skipped (it doesn't have an id)
             0 -> Choke
             1 -> Unchoke
             2 -> Interested

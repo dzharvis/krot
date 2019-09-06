@@ -123,7 +123,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                         log("[Piece] ${message.id} arrived")
                         progress.numPeers = activePeers.size
                         downloadsInProgress--
-                        val hashEqual = isPieceValid(message)
+                        val hashEqual = message.isValid()
                         if (!hashEqual) {
                             log("[Piece] ${message.id} hash check failed")
                             piecesToPeers[message.id]?.inProgress = false
@@ -170,13 +170,13 @@ class Krot(val disk: Disk, val tracker: Tracker) {
         }
     }
 
-    private fun isPieceValid(message: Piece): Boolean {
-        val expectedHash = tracker.torrentData.getPieceSha1(message.id)
-        val pieceHash = sha1(message.bytes)
+    private fun Piece.isValid(): Boolean {
+        val expectedHash = tracker.torrentData.getPieceSha1(this.id)
+        val pieceHash = sha1(this.bytes)
         return Arrays.equals(expectedHash, pieceHash)
     }
 
-    // returns amount of downloads initiated
+    // returns list of piece ids initiated for download
     private fun initiateDownloadIfNecessary(
         piecesToPeers: Map<Int, PieceInfo>,
         downloadsInProgress: Int
@@ -193,18 +193,21 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                 .sortedBy { it.peers.size } // rarest first
                 .take(amount)
                 .mapNotNull { piece ->
-                    val peer = piece.peers.random() // TODO get fastest from free peers
-                    val offer = try {
-                        peer.input.offer(DownloadRequest(piece.id, piece.length))
-                    } catch (ex: ClosedSendChannelException) {
-                        false
-                    }
-                    if (offer) {
-                        log("[Krot] Peer $peer started downloading process")
-                        piece.inProgress = true
-                        piece.id
-                    } else
-                        null
+                    // TODO get fastest from free peers
+                    piece
+                        .peers
+                        .shuffled()
+                        .firstOrNull {
+                            try {
+                                it.input.offer(DownloadRequest(piece.id, piece.length))
+                            } catch (ex: ClosedSendChannelException) {
+                                false
+                            }
+                        }?.let {
+                            log("[Krot] Peer $it started downloading process")
+                            piece.inProgress = true
+                            piece.id
+                        }
                 }.toList()
     }
 

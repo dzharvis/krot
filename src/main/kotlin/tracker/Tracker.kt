@@ -48,7 +48,7 @@ private fun infoDictSHA1(info: Any): ByteArray {
 }
 
 private fun parsePeers(peers: ByteArray): List<PeerAddr> {
-    return (0 until peers.size step 6).map { i ->
+    return (peers.indices step 6).map { i ->
         val ip1 = (peers[i] + 0) and 0xff // + 0 for int casting. I don't like .toInt()
         val ip2 = (peers[i + 1] + 0) and 0xff
         val ip3 = (peers[i + 2] + 0) and 0xff
@@ -68,29 +68,30 @@ class Tracker private constructor(
     companion object {
         fun fromFile(file: String): Tracker {
             val torrent = BDecoder(File(file).inputStream()).decodeMap().map
-            val infoSHA1 = infoDictSHA1(torrent["info"]!!)
+            val torrentInfo = torrent["info"]!!
+            val infoSHA1 = infoDictSHA1(torrentInfo)
             val peerId = generatePeerId()
-            val private = torrent["info"]!!.map["private"]?.int == 1
-            val numPieces = torrent["info"]!!.map["pieces"]!!.bytes.size / 20
-            val pieceLength = torrent["info"]!!.map["piece length"]!!.long
-            val singleFileMode = torrent["info"]!!.map["files"] == null
-            val folderName = if (singleFileMode) null else torrent["info"]!!.map["name"]!!.string
-            val piecesSha1 = torrent["info"]!!.map["pieces"]!!.bytes
+            val private = torrentInfo.map["private"]?.int == 1
+            val numPieces = torrentInfo.map["pieces"]!!.bytes.size / 20
+            val pieceLength = torrentInfo.map["piece length"]!!.long
+            val singleFileMode = torrentInfo.map["files"] == null
+            val folderName = if (singleFileMode) null else torrentInfo.map["name"]!!.string
+            val piecesSha1 = torrentInfo.map["pieces"]!!.bytes
             val files = if (singleFileMode) {
-                val fileName = torrent["info"]!!.map["name"]!!.string
-                val fileLength = torrent["info"]!!.map["length"]!!.long
+                val fileName = torrentInfo.map["name"]!!.string
+                val fileLength = torrentInfo.map["length"]!!.long
                 listOf(TorrentFile(fileLength, listOf(fileName)))
             } else {
-                torrent["info"]!!.map["files"]!!.list.map { f ->
+                torrentInfo.map["files"]!!.list.map { f ->
                     TorrentFile(
                         f.map["length"]!!.long,
                         f.map["path"]!!.list.map { it.string })
                 }
             }
             val numBytes = if (singleFileMode) {
-                torrent["info"]!!.map["length"]!!.long
+                torrentInfo.map["length"]!!.long
             } else {
-                torrent["info"]!!.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
+                torrentInfo.map["files"]!!.list.map { it.map["length"]!!.long }.fold(0L, { acc, i -> acc + i })
             }
             val diff = numPieces * pieceLength - numBytes
             val charset = Charset.forName("Windows-1251")

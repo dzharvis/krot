@@ -153,7 +153,7 @@ class PeerConnection(
     private suspend fun processPayload(payload: Message) {
         when (payload) {
             is Bitfield -> { // has parts bitfield
-                for (i in 0 until payload.bitField.size) {
+                for (i in payload.bitField.indices) {
                     val currentByte = (payload.bitField[i] + 0) and 0xff
                     for (j in 0 until 8) {
                         val has = ((currentByte ushr (7 - j)) and 1) == 1
