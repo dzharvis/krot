@@ -1,5 +1,5 @@
 ![Usage example](pics/mole.png)
-![](https://github.com/dzharvis/krot/workflows/.github/workflows/release.yml/badge.svg)
+![](https://github.com/dzharvis/krot/workflows/Java%20CI/badge.svg)
 # Command Line Torrent Client
 Command line torrent client written in kotlin using coroutines.
 
