@@ -38,6 +38,7 @@ class PeerConnection(
         try {
             val protocol = Protocol(addr, 32384, channel)
             protocolExtensions.addAll(protocol.connect(sha1, peerId))
+            requestPeers(protocol, sha1, peerId)
             coroutineScope {
                 // read peer messages
                 val peerMessages = produce(capacity = 100) {
@@ -103,13 +104,16 @@ class PeerConnection(
         }
     }
 
+    private suspend fun requestPeers(protocol: Protocol, sha1: ByteArray, peerId: ByteArray) {
+        protocol.writeMessage(DHTRequest(peerId, sha1))
+    }
+
     private suspend fun waitUnchoke(peerMessages: ReceiveChannel<Message>) {
         when (val response = peerMessages.receive()) {
             is Unchoke -> choked = false
             else -> throw InvalidObjectException("Unchoke expected, $response received")
         }
     }
-
     private suspend fun downloadPiece(
         id: Int,
         pieceLength: Int,

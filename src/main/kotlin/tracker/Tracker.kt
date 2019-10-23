@@ -140,6 +140,7 @@ class Tracker private constructor(
             conn.requestMethod = "GET"
             val response = BDecoder(conn.inputStream.buffered()).decodeMap().map
             if (trackerId == null) trackerId = response["tracker id"]?.string
+            require(response["failure reason"] == null) { response["failure reason"]!!.string }
             return parsePeers(response["peers"]!!.bytes)
         } finally {
             conn.disconnect()

@@ -20,6 +20,8 @@ data class Have(val pieceIndex: Int) : Message(4)
 data class Bitfield(val bitField: ByteArray) : Message(5)
 data class Request(val index: Int, val begin: Int, val length: Int) : Message(6)
 data class Chunk(val index: Int, val begin: Int, val block: ByteArray) : Message(7)
+// extensions
+data class DHTRequest(val peerId: ByteArray, val sha1: ByteArray): Message(-1)
 
 enum class Flags {
     DHT
