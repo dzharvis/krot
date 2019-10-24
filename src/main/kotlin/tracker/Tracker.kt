@@ -2,6 +2,7 @@ package tracker
 
 import be.adaxisoft.bencode.BDecoder
 import be.adaxisoft.bencode.BEncoder
+import utils.log
 import utils.sha1
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -136,12 +137,15 @@ class Tracker private constructor(
 
         val query = URL("$announceUrl&$params")
         val conn = query.openConnection() as HttpURLConnection
-        try {
+        return try {
             conn.requestMethod = "GET"
             val response = BDecoder(conn.inputStream.buffered()).decodeMap().map
             if (trackerId == null) trackerId = response["tracker id"]?.string
             require(response["failure reason"] == null) { response["failure reason"]!!.string }
-            return parsePeers(response["peers"]!!.bytes)
+            parsePeers(response["peers"]!!.bytes)
+        } catch (ex: Exception) {
+            log(ex.toString())
+            emptyList()
         } finally {
             conn.disconnect()
         }

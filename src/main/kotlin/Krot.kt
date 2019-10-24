@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.TickerMode
 import kotlinx.coroutines.channels.ticker
 import kotlinx.coroutines.selects.select
 import main.progress.Progress
+import main.progress.State
 import protocol.PeerConnection
 import tracker.Tracker
 import utils.getPieceSha1
@@ -17,7 +18,7 @@ import java.net.InetSocketAddress
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 
-// messages for communication with peers
+// messages for communication with peer clients
 sealed class SupervisorMsg
 
 data class HasPiece(val id: Int, val peer: PeerConnection) : SupervisorMsg()
@@ -44,10 +45,10 @@ class Krot(val disk: Disk, val tracker: Tracker) {
         val progress = Progress(numPieces, pieceLength)
         progress.printProgress()
 
-        progress.state = "Hash check"
+        progress.state = State.HASH_CHECK
         val presentPieces = disk.checkDownloadedPieces(progress)
         if (presentPieces.size == numPieces) {
-            progress.state = "Done"
+            progress.state = State.DONE
             return
         }
 
@@ -81,7 +82,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
             }
 
             disk.initWriter()
-            progress.state = "Downloading"
+            progress.state = State.DOWNLOADING
             val ticker = ticker(delayMillis = 5000, initialDelayMillis = 0, mode = TickerMode.FIXED_DELAY)
             while (true) {
                 when (val message = select<SupervisorMsg> {
@@ -134,7 +135,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                             disk.input.send(message)
                             progress.setDone(message.id)
                             if (piecesToPeers.isEmpty()) {
-                                progress.state = "Done"
+                                progress.state = State.DONE
                                 disk.input.close()
                                 return@launch
                             }
@@ -189,6 +190,7 @@ class Krot(val disk: Disk, val tracker: Tracker) {
         return if (amount == 0) emptyList()
         else
             piecesToPeers
+                .asSequence()
                 .map { (_, piece) -> piece }
                 .filter { piece ->
                     (ignoreDuplicates || !piece.inProgress) && piece.peers.isNotEmpty()

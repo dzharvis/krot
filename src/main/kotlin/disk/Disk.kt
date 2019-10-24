@@ -88,7 +88,7 @@ class Disk(private val rootFolder: File, private val torrentData: TorrentData) {
         val pieceLength = torrentData.pieceLength
         val pieceBufferSize = 100 * 1024 * 1024 // 100MB
         val bufferLength = pieceBufferSize / pieceLength
-        writerJob = GlobalScope.launch {
+        writerJob = GlobalScope.launch(newSingleThreadContext("Disk writer")) {
             val pieceBuffer = ArrayList<Piece>()
             for (piece in input) {
                 pieceBuffer.add(piece)
@@ -102,15 +102,13 @@ class Disk(private val rootFolder: File, private val torrentData: TorrentData) {
         }
     }
 
-    private suspend fun writeToDisk(pieces: List<Piece>) {
-        withContext(Dispatchers.IO) {
-            for (piece in pieces.sortedBy { it.id }) {
-                for ((path, fileOperations) in prepare(piece).groupBy { it.file }) {
-                    val raf = openRandomAccessFile(File(rootFolder, path.joinToString(File.separator)))
-                    for ((_, offset, data) in fileOperations) {
-                        raf.seek(offset)
-                        raf.write(data)
-                    }
+    private fun writeToDisk(pieces: List<Piece>) {
+        for (piece in pieces.sortedBy { it.id }) {
+            for ((path, fileOperations) in prepare(piece).groupBy { it.file }) {
+                val raf = openRandomAccessFile(File(rootFolder, path.joinToString(File.separator)))
+                for ((_, offset, data) in fileOperations) {
+                    raf.seek(offset)
+                    raf.write(data)
                 }
             }
         }

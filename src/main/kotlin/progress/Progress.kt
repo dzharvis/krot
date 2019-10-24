@@ -7,10 +7,19 @@ object InProgress: ProgressState()
 object Done: ProgressState()
 object Empty: ProgressState()
 
+enum class State(val label: String) {
+    INIT("Init"),
+    DOWNLOADING("Downloading"),
+    HASH_CHECK("Hash check"),
+    DONE("Done")
+
+
+}
+
 class Progress(private val numPieces: Int, private val pieceSize: Long) {
     private val progress: MutableList<ProgressState> = MutableList(numPieces) { Empty }
     private val bandwidthWindow = mutableListOf<Long>()
-    var state = "Init"
+    var state = State.INIT
     var numPeers = 0
     var downloadsInProgress = 0
 
@@ -61,7 +70,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
     var maxProgressLen = 0
 
     fun printProgress() {
-        val peersStr = if (state == "Downloading") "from $downloadsInProgress($numPeers) peers" else ""
+        val peersStr = if (state == State.DOWNLOADING) "from $downloadsInProgress($numPeers) peers" else ""
         var progressStr = "$state ${getProgressPercent()} : $peersStr ${getProgressString()} ${getBandwidth()}"
         // pad with spaces in order to clear old values
         progressStr = if (progressStr.length < maxProgressLen) {
