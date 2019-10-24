@@ -56,7 +56,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
     }
 
     private fun getBandwidth(): String {
-        val bps = bandwidth.getBandwidth() / 1024 / 5
+        val bps = bandwidth.getBandwidth() / 1024
         return "$bps KB/sec"
     }
 
