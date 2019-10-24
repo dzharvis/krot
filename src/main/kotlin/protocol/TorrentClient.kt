@@ -10,6 +10,7 @@ import krot.Ticker
 import krot.HasPiece
 import krot.Piece
 import krot.DownloadCanceledRequest
+import utils.BandwidthCalculator
 import java.io.IOException
 import java.io.InvalidObjectException
 import java.lang.Exception
@@ -28,6 +29,9 @@ class PeerConnection(
     var choked = true
     val input = Channel<SupervisorMsg>() // for external events. Should be called only with offer
     private val protocolExtensions = mutableSetOf<Flags>()
+
+    private val bandwidth = BandwidthCalculator()
+    fun getBandwidth() = bandwidth.getBandwidth()
 
     private fun log(msg: String) {
         utils.log("[$addr] $msg")
@@ -138,6 +142,7 @@ class PeerConnection(
             when (val response = peerMessages.receive()) {
                 is Chunk -> {
                     System.arraycopy(response.block, 0, pieceBytes, i, chunkSize)
+                    bandwidth.record(response.block.size.toLong())
                 }
                 is Unchoke -> {
                     log("Unchoke received here. Retry")

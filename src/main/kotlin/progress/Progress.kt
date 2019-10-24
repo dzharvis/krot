@@ -1,5 +1,6 @@
 package main.progress
 
+import utils.BandwidthCalculator
 import utils.progress
 
 sealed class ProgressState
@@ -12,20 +13,20 @@ enum class State(val label: String) {
     DOWNLOADING("Downloading"),
     HASH_CHECK("Hash check"),
     DONE("Done")
-
-
 }
 
 class Progress(private val numPieces: Int, private val pieceSize: Long) {
     private val progress: MutableList<ProgressState> = MutableList(numPieces) { Empty }
-    private val bandwidthWindow = mutableListOf<Long>()
+
+    private val bandwidth = BandwidthCalculator()
+
     var state = State.INIT
     var numPeers = 0
     var downloadsInProgress = 0
 
     fun setDone(id: Int) {
         progress[id] = Done
-        recalcBandwidth()
+        bandwidth.record(pieceSize)
     }
 
     fun setEmpty(id: Int) {
@@ -34,12 +35,6 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
 
     fun setInProgress(id: Int) {
         progress[id] = InProgress
-    }
-
-    private fun recalcBandwidth() {
-        val currentTime = System.currentTimeMillis()
-        bandwidthWindow.add(currentTime)
-        bandwidthWindow.removeIf { it < currentTime - 5000 } // last 5 sec window
     }
 
     private fun getProgressString(): String {
@@ -61,9 +56,7 @@ class Progress(private val numPieces: Int, private val pieceSize: Long) {
     }
 
     private fun getBandwidth(): String {
-        val currentTime = System.currentTimeMillis()
-        val bytesReceived = bandwidthWindow.filter { it >= currentTime - 5000 }.fold(0L, { acc, _ -> acc + pieceSize })
-        val bps = bytesReceived / 1024 / 5
+        val bps = bandwidth.getBandwidth() / 1024 / 5
         return "$bps KB/sec"
     }
 

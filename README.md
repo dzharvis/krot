@@ -11,7 +11,6 @@ First argument is torrent file, second - destination folder.
 ![Usage example](pics/screenshot.png)
 
 ## Todo
-- Windows cmd refresh fix
 - Multithreaded hash check at init
 - Magnet links
 - Write tests

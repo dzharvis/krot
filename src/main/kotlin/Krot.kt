@@ -195,13 +195,14 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                 .filter { piece ->
                     (ignoreDuplicates || !piece.inProgress) && piece.peers.isNotEmpty()
                 }
-                .sortedBy { it.peers.size } // rarest first
+                    // TODO force sequential mode via parameter
+                    // fastest pieces first
+                .sortedByDescending { it.peers.map { peer -> peer.getBandwidth() }.sum() }
                 .take(amount)
                 .mapNotNull { piece ->
-                    // TODO get fastest from free peers
                     piece
                         .peers
-                        .shuffled()
+                        .sortedByDescending { it.getBandwidth() }
                         .firstOrNull {
                             try {
                                 it.input.offer(DownloadRequest(piece.id, piece.length))

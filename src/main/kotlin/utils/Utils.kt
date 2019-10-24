@@ -34,7 +34,7 @@ val loggingEnabled = false
 private fun logg(msg: String) = println("[${Thread.currentThread().name}] $msg")
 
 fun progress(msg: String) {
-    if (!loggingEnabled) logg(msg)
+    if (!loggingEnabled) print(msg)
 }
 
 fun log(msg: String) {
