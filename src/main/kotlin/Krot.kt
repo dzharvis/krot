@@ -197,15 +197,19 @@ class Krot(val disk: Disk, val tracker: Tracker) {
                 }
                     // TODO force sequential mode via parameter
                     // fastest pieces first
-                .sortedByDescending { it.peers.map { peer -> peer.getBandwidth() }.sum() }
+                .map { Pair(it, it.peers.map { peer -> peer.getBandwidth() }.sum())}
+                .sortedByDescending {(p, s) -> s }
+                .map { (p, _) -> p }
                 .take(amount)
                 .mapNotNull { piece ->
                     piece
                         .peers
-                        .sortedByDescending { it.getBandwidth() }
-                        .firstOrNull {
+                        .asSequence()
+                        .map { Pair(it, it.getBandwidth()) }
+                        .sortedByDescending {(_, s) -> s }
+                        .firstOrNull {(p, s) ->
                             try {
-                                it.input.offer(DownloadRequest(piece.id, piece.length))
+                                p.input.offer(DownloadRequest(piece.id, piece.length))
                             } catch (ex: ClosedSendChannelException) {
                                 false
                             }
