@@ -1,5 +1,6 @@
 package protocol
 
+import async.AsyncNettyClient
 import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.*
 import kotlinx.coroutines.selects.select
@@ -15,7 +16,6 @@ import java.io.IOException
 import java.io.InvalidObjectException
 import java.lang.Exception
 import java.net.InetSocketAddress
-import java.nio.channels.AsynchronousSocketChannel
 
 class PeerConnection(
     val addr: InetSocketAddress,
@@ -38,22 +38,24 @@ class PeerConnection(
     }
 
     suspend fun start(sha1: ByteArray, peerId: ByteArray) {
-        val channel = AsynchronousSocketChannel.open()
         try {
-            val protocol = Protocol(addr, 32384, channel)
-            protocolExtensions.addAll(protocol.connect(sha1, peerId))
-            requestPeers(protocol, sha1, peerId)
+            //Protocol(addr, 32384, channel)
+            val client = AsyncNettyClient.connect(addr)
+            protocolExtensions.addAll(client.doHandshake(sha1, peerId))
+//            requestPeers(client, sha1, peerId)
             coroutineScope {
                 // read peer messages
                 val peerMessages = produce(capacity = 100) {
                     while (isActive) {
-                        when (val element = protocol.readMessage()) {
+                        when (val element = client.read()) {
                             is KeepAlive,
                             is Have,
                             is Bitfield -> {
+                                log("Processing payload $element")
                                 processPayload(element)
                             }
                             else -> {
+//                                log("Sending payload $element")
                                 send(element)
                             }
                         }
@@ -64,7 +66,7 @@ class PeerConnection(
                 launch {
                     // 1.5 send keep-alive
                     val ticker = ticker(delayMillis = 1000 * 90, initialDelayMillis = 1000 * 60, mode = TickerMode.FIXED_DELAY)
-                    val protocol = Protocol(addr, 8192, channel)
+//                    val protocol = Protocol(addr, 8192, channel)
                     while (isActive) {
                         when (val message = select<SupervisorMsg> {
                             input.onReceive { it }
@@ -72,7 +74,7 @@ class PeerConnection(
                         }) {
                             is DownloadRequest -> {
                                 val piece = try {
-                                    downloadPiece(message.id, message.pieceLength, peerMessages, protocol)
+                                    downloadPiece(message.id, message.pieceLength, peerMessages, client)
                                 } catch (ex: Exception) {
                                     log("Piece Download was interrupted! ${message.id}")
                                     withContext(NonCancellable) {
@@ -85,7 +87,7 @@ class PeerConnection(
                             }
                             is Ticker -> {
                                 log("Sending keep-alive")
-                                protocol.writeMessage(KeepAlive)
+                                client.write(KeepAlive)
                             }
                         }
                     }
@@ -100,7 +102,7 @@ class PeerConnection(
             }
         } finally {
             val peer = this
-            channel.close()
+//            client.close()
             withContext(NonCancellable) {
                 input.close()
                 output.send(Closed(peer))
@@ -108,8 +110,8 @@ class PeerConnection(
         }
     }
 
-    private suspend fun requestPeers(protocol: Protocol, sha1: ByteArray, peerId: ByteArray) {
-        protocol.writeMessage(DHTRequest(peerId, sha1))
+    private suspend fun requestPeers(protocol: AsyncNettyClient, sha1: ByteArray, peerId: ByteArray) {
+        protocol.write(DHTRequest(peerId, sha1))
     }
 
     private suspend fun waitUnchoke(peerMessages: ReceiveChannel<Message>) {
@@ -122,12 +124,12 @@ class PeerConnection(
         id: Int,
         pieceLength: Int,
         peerMessages: ReceiveChannel<Message>,
-        protocol: Protocol,
+        client: AsyncNettyClient,
         retryCount: Int = 5
     ): Piece {
         if (retryCount == 0) error("Maximum retry count reached")
         if (choked) {
-            protocol.writeMessage(Interested) // i don't know if i should send interested again after choking
+            client.write(Interested) // i don't know if i should send interested again after choking
             log("Interested byte sent")
             waitUnchoke(peerMessages)
             log("unchoke here")
@@ -138,7 +140,7 @@ class PeerConnection(
         val pieceBytes = ByteArray(pieceLength)//ByteBuffer.allocate(pieceLength + defaultChunkSize)
         for (i in 0 until pieceLength step defaultChunkSize) {
             val chunkSize = if (i + defaultChunkSize > pieceLength) (pieceLength - i) else defaultChunkSize
-            protocol.writeMessage(Request(id, i, chunkSize))
+            client.write(Request(id, i, chunkSize))
             when (val response = peerMessages.receive()) {
                 is Chunk -> {
                     System.arraycopy(response.block, 0, pieceBytes, i, chunkSize)
@@ -147,11 +149,11 @@ class PeerConnection(
                 is Unchoke -> {
                     log("Unchoke received here. Retry")
                     choked = false
-                    return downloadPiece(id, pieceLength, peerMessages, protocol, retryCount - 1)
+                    return downloadPiece(id, pieceLength, peerMessages, client, retryCount - 1)
                 }
                 is Choke -> {
                     choked = true
-                    return downloadPiece(id, pieceLength, peerMessages, protocol, retryCount - 1) // stupid retry
+                    return downloadPiece(id, pieceLength, peerMessages, client, retryCount - 1) // stupid retry
                 }
                 else -> throw InvalidObjectException("Chunk expected, $response received")
             }

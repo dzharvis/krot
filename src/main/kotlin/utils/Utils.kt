@@ -29,7 +29,7 @@ fun intersection(x1: Long, y1: Long, x2: Long, y2: Long): Intersection {
     }
 }
 
-val loggingEnabled = false
+val loggingEnabled = true
 
 private fun logg(msg: String) = println("[${Thread.currentThread().name}] $msg")
 

@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 
 
 sealed class Message(val id: Byte)
+data class Raw(val bytes: ByteArray) : Message(-1)
 object KeepAlive : Message(-1)
 object Choke : Message(0)
 object Unchoke : Message(1)
