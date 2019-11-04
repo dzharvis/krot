@@ -121,10 +121,10 @@ class Decoder(private val output: kotlinx.coroutines.channels.Channel<Message>) 
                 throw IllegalArgumentException()
             }
         }
-        m.release()
+//        m.release()
 //        println(resp)
 
-        GlobalScope.launch { require(output.offer(resp)) }
+        require(output.offer(resp))
     }
 
     override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
@@ -140,6 +140,7 @@ class HandshakeHandler(private val output: kotlinx.coroutines.channels.Channel<M
 //        println("Handshake")
         val m = (msg as ByteBuf)
         // read length prefix
+        m.markReaderIndex()
         val protocolLength = m.readUnsignedByte().toInt()
         if (m.readableBytes() < protocolLength + 8 + 20 + 20) {
             m.resetReaderIndex()
@@ -150,13 +151,15 @@ class HandshakeHandler(private val output: kotlinx.coroutines.channels.Channel<M
 //        println(m.readableBytes())
         // read handshake response
         val b = m.toByteArray(protocolLength + 8 + 20 + 20)
-
+//        println("[hadnshake]: " + b.toHexStr())
         log(String(b, Charset.forName("Windows-1251")))
 //        return parseFlags(b.copyOfRange(protocolLength, protocolLength + 8))
 //        m.release()
 //        ctx.fireChannelReadComplete()
+//        m.release()
         ctx.pipeline().remove(this)
         require(output.offer(Raw(b)))
+        ctx.fireChannelRead(msg)
     }
 
     override fun exceptionCaught(ctx: ChannelHandlerContext, cause: Throwable) {
@@ -171,14 +174,18 @@ class AsyncNettyClient(
     private val output: kotlinx.coroutines.channels.Channel<Message>
 ) {
 
-    suspend fun read() = withTimeoutOrNull(5000) { output.receive() } ?: run {
+    suspend fun read() = withTimeoutOrNull(15000) { output.receive() } ?: run {
         channel.close()
-        output.close(RuntimeException("Channel closed"))
-        throw RuntimeException("Channel closed")
+        output.close(RuntimeException("Read timeout"))
+        throw RuntimeException("Read timeout")
     }
     suspend fun write(msg: Message) {
-        require(channel.isActive && channel.isWritable)
-        val write = channel.write(msg)
+        if(channel.isActive && channel.isWritable) {
+            val write = channel.write(msg)
+        } else {
+            channel.close()
+            throw RuntimeException("Channel closed")
+        }
 //        return suspendCancellableCoroutine { cont ->
 //            write.addListener {
 //                if (it.isDone && it.isSuccess)
@@ -218,7 +225,7 @@ class AsyncNettyClient(
     companion object {
         private val workerGroup = NioEventLoopGroup()
         suspend fun connect(addr: InetSocketAddress): AsyncNettyClient {
-            val output = kotlinx.coroutines.channels.Channel<Message>(10)
+            val output = kotlinx.coroutines.channels.Channel<Message>(500)
             val b = Bootstrap()
             b.group(workerGroup)
             b.channel(NioSocketChannel::class.java)
@@ -228,7 +235,7 @@ class AsyncNettyClient(
             b.handler(object : ChannelInitializer<SocketChannel>() {
                 public override fun initChannel(ch: SocketChannel) {
                     ch.pipeline().addLast(HandshakeHandler(output))
-                    ch.pipeline().addLast(LengthFieldBasedFrameDecoder(256 * 1025, 0, 4))
+                    ch.pipeline().addLast(LengthFieldBasedFrameDecoder(16 * 1025, 0, 4))
                     ch.pipeline().addLast(Encoder())
                     ch.pipeline().addLast(Decoder(output))
                 }
@@ -263,6 +270,8 @@ class AsyncNettyClient(
         return emptySet()
     }
 }
+
+private fun ByteArray.toHexStr() = this.joinToString("") { String.format("%02X", it) }
 
 private fun ByteBuf.toByteArray(len: Int): ByteArray {
     val body = ByteArray(len)
