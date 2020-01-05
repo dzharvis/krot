@@ -11,6 +11,7 @@ First argument is torrent file, second - destination folder.
 ![Usage example](pics/screenshot.png)
 
 ## Todo
+- Request pipelining
 - Multithreaded hash check at init
 - Magnet links
 - Write tests
